@@ -1,0 +1,42 @@
+{{define "title"}}Kids{{end}}
+
+{{define "content"}}
+<main class="card">
+  <div class="topbar">
+    <p class="brand">Alphabeter</p>
+    <form method="post" action="/logout"><button type="submit" class="link-button">Log out</button></form>
+  </div>
+  <h1>Who's playing?</h1>
+  {{template "kid-list" .}}
+</main>
+{{end}}
+
+{{define "kid-list"}}
+<section id="kid-list">
+  {{if .Kids}}
+  <ul class="kids">
+    {{range .Kids}}
+    <li class="kid">
+      <div class="kid-info">
+        <div class="kid-name">{{.Name}}</div>
+        <div class="kid-meta">{{.Progress}}</div>
+      </div>
+      <a class="play-link" href="/kids/{{.Path}}/play">Play</a>
+      <form method="post" action="/kids/{{.Path}}/delete"
+            hx-post="/kids/{{.Path}}/delete" hx-target="#kid-list" hx-swap="outerHTML"
+            hx-confirm="Delete {{.Name}} and all their progress?">
+        <button type="submit" class="link-button" aria-label="Delete {{.Name}}">Delete</button>
+      </form>
+    </li>
+    {{end}}
+  </ul>
+  {{else}}
+  <p class="empty">Add a kid to start playing.</p>
+  {{end}}
+  {{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
+  <form class="add" method="post" action="/kids" hx-post="/kids" hx-target="#kid-list" hx-swap="outerHTML">
+    <input type="text" name="name" value="{{.Name}}" placeholder="Kid's name" aria-label="Kid's name" maxlength="40" required>
+    <button type="submit" class="primary">Add</button>
+  </form>
+</section>
+{{end}}

@@ -1,0 +1,21 @@
+{{define "title"}}Create an account{{end}}
+
+{{define "content"}}
+<main class="card">
+  <p class="brand">Alphabeter</p>
+  <h1>Create an account</h1>
+  {{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
+  <form method="post" action="/oauth/register" class="stack">
+    {{range .Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">
+    {{end}}
+    <label>Email
+      <input type="email" name="email" value="{{.Email}}" autocomplete="email" required autofocus>
+    </label>
+    <label>Password <span class="hint">at least 8 characters</span>
+      <input type="password" name="password" autocomplete="new-password" minlength="8" maxlength="128" required>
+    </label>
+    <button type="submit" class="primary">Create account</button>
+  </form>
+  <p class="alt">Already have an account? <a href="{{.AltURL}}">Log in</a></p>
+</main>
+{{end}}

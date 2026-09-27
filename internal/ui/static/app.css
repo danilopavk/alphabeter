@@ -1,0 +1,184 @@
+:root {
+  --ink: #111;
+  --muted: #666;
+  --line: #d9d9d9;
+  --bg: #fff;
+  --accent: #2456d6;
+  --danger: #b3261e;
+  --danger-bg: #fdecea;
+  --yes: #1a7f37;
+  --no: #c62828;
+  --radius: .65rem;
+  color-scheme: light;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); line-height: 1.45; }
+a { color: var(--accent); }
+h1 { font-size: 1.4rem; margin: 0 0 1.25rem; }
+
+:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  outline-offset: 2px;
+}
+
+.card { max-width: 26rem; margin: 0 auto; padding: 2.5rem 1rem 3rem; }
+.brand {
+  font-family: Arial, Helvetica, sans-serif;
+  font-weight: 700;
+  font-size: 1.1rem;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 1.5rem;
+}
+
+.stack { display: grid; gap: 1rem; }
+label { display: grid; gap: .35rem; font-weight: 600; font-size: .95rem; }
+.hint { color: var(--muted); font-weight: 400; font-size: .85rem; }
+
+input[type=email], input[type=password], input[type=text] {
+  font: inherit;
+  font-weight: 400;
+  width: 100%;
+  padding: .75rem .85rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+  padding: .75rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  color: var(--ink);
+}
+button.primary { background: var(--ink); border-color: var(--ink); color: #fff; font-weight: 600; }
+button:disabled { opacity: .5; cursor: default; }
+
+.error {
+  margin: 0 0 1rem;
+  padding: .75rem .85rem;
+  border-radius: var(--radius);
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+.alt { margin-top: 1.5rem; color: var(--muted); }
+
+/* Kids */
+.topbar { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 1.25rem; }
+.topbar h1 { margin: 0; }
+.link-button { background: none; border: none; padding: .25rem; color: var(--muted); text-decoration: underline; }
+.kids { list-style: none; margin: 0 0 1.5rem; padding: 0; display: grid; gap: .75rem; }
+.kid {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  padding: .75rem .9rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.kid-info { flex: 1; min-width: 0; }
+.kid-name { font-weight: 600; overflow-wrap: anywhere; }
+.kid-meta { color: var(--muted); font-size: .85rem; }
+.kid form { margin: 0; }
+.play-link {
+  padding: .55rem 1rem;
+  border-radius: var(--radius);
+  background: var(--ink);
+  color: #fff;
+  font-weight: 600;
+  text-decoration: none;
+}
+.empty { color: var(--muted); margin: 0 0 1.5rem; }
+.add { display: flex; gap: .5rem; }
+.add input { flex: 1; min-width: 0; }
+
+/* Play: white screen, huge black symbol, Yes/No for the parent below. */
+body.play { height: 100vh; height: 100dvh; overflow: hidden; background: #fff; }
+#stage { height: 100vh; height: 100dvh; display: grid; grid-template-rows: 1fr auto; }
+.symbol {
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: min(calc(100vh - 10rem), 95vw);
+  font-size: min(calc(100dvh - 10rem), 95vw);
+  line-height: 1;
+  color: #000;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.answers {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  padding: 1rem 1rem max(1rem, env(safe-area-inset-bottom));
+  margin: 0;
+}
+.answers button {
+  padding: 1.1rem;
+  border: none;
+  border-radius: 1rem;
+  color: #fff;
+  font-size: 1.75rem;
+  font-weight: 700;
+  touch-action: manipulation;
+}
+.answers .yes { background: var(--yes); }
+.answers .no { background: var(--no); }
+.back {
+  position: fixed;
+  top: .5rem;
+  left: .5rem;
+  padding: .5rem .75rem;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 1rem;
+}
+
+/* Score of the symbol on screen, for the parent. */
+.score {
+  position: fixed;
+  top: .6rem;
+  right: .9rem;
+  max-width: 62vw;
+  text-align: right;
+  line-height: 1.3;
+  pointer-events: none;
+}
+.score-value { font-weight: 700; font-size: 1rem; color: var(--ink); }
+.score-note { font-size: .8rem; color: var(--muted); }
+
+/* The answer just given: the letter's new score, shown for 2 seconds. */
+.flash {
+  position: fixed;
+  top: 3.9rem;
+  right: .9rem;
+  max-width: 62vw;
+  padding: .3rem .7rem;
+  border: 2px solid currentColor;
+  border-radius: var(--radius);
+  background: #fff;
+  text-align: right;
+  font-weight: 700;
+  font-size: 1.3rem;
+  line-height: 1.3;
+  pointer-events: none;
+  animation: flash-hide 0s 2s forwards;
+}
+.flash.right { color: var(--yes); }
+.flash.wrong { color: var(--no); }
+.flash-symbol { font-family: Arial, Helvetica, sans-serif; }
+.flash-delta { font-size: .9rem; }
+.flash-message { font-size: 1rem; color: var(--ink); }
+
+@keyframes flash-hide {
+  to { visibility: hidden; }
+}

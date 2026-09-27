@@ -1,0 +1,21 @@
+{{define "title"}}Log in{{end}}
+
+{{define "content"}}
+<main class="card">
+  <p class="brand">Alphabeter</p>
+  <h1>Log in</h1>
+  {{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
+  <form method="post" action="/oauth/authorize" class="stack">
+    {{range .Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">
+    {{end}}
+    <label>Email
+      <input type="email" name="email" value="{{.Email}}" autocomplete="email" required autofocus>
+    </label>
+    <label>Password
+      <input type="password" name="password" autocomplete="current-password" required>
+    </label>
+    <button type="submit" class="primary">Log in</button>
+  </form>
+  <p class="alt">New here? <a href="{{.AltURL}}">Create an account</a></p>
+</main>
+{{end}}

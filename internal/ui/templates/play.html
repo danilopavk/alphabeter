@@ -1,0 +1,33 @@
+{{define "title"}}{{.Name}}{{end}}
+
+{{define "bodyclass"}}play{{end}}
+
+{{define "content"}}
+<a class="back" href="/kids">← Kids</a>
+{{template "stage" .}}
+{{end}}
+
+{{define "stage"}}
+<main id="stage">
+  <div class="score">
+    <div class="score-value">{{.Symbol}} score: {{.Score}}</div>
+    <div class="score-note">{{.Note}}</div>
+  </div>
+  {{with .Flash}}
+  <div class="flash {{if .Correct}}right{{else}}wrong{{end}}" role="status">
+    <span class="flash-symbol">{{.Symbol}}</span> {{if .Correct}}✓{{else}}✗{{end}}
+    <span class="flash-score">{{.To}}</span>
+    <span class="flash-delta">{{.Delta}}</span>
+    {{with .Message}}<div class="flash-message">{{.}}</div>{{end}}
+  </div>
+  {{end}}
+  <div class="symbol" aria-live="polite">{{.Symbol}}</div>
+  <form class="answers" method="post" action="/kids/{{.Path}}/answer"
+        hx-post="/kids/{{.Path}}/answer" hx-target="#stage" hx-swap="outerHTML"
+        hx-disabled-elt="find .yes, find .no">
+    <input type="hidden" name="seq" value="{{.Seq}}">
+    <button type="submit" name="correct" value="1" class="yes">Yes</button>
+    <button type="submit" name="correct" value="0" class="no">No</button>
+  </form>
+</main>
+{{end}}
