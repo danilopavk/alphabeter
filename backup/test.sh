@@ -63,7 +63,7 @@ backup() {
 echo "building image and starting Postgres + S3"
 docker build --quiet --tag "$image" . >/dev/null
 docker network create "$run" >/dev/null
-docker run -d --name "$pg" --network "$run" -e POSTGRES_PASSWORD=pw postgres:17-alpine >/dev/null
+docker run -d --name "$pg" --network "$run" -e POSTGRES_PASSWORD=pw postgres:18-alpine >/dev/null
 docker run -d --name "$s3" --network "$run" \
 	-e RUSTFS_ACCESS_KEY="$access_key" -e RUSTFS_SECRET_KEY="$secret_key" rustfs/rustfs:1.0.0 >/dev/null
 # TCP, not the socket: during initdb the image runs a socket-only temporary server.
