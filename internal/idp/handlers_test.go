@@ -167,17 +167,24 @@ func TestAuthorizeRateLimit(t *testing.T) {
 	}
 }
 
-func TestRegisterCreatesAccountAndIssuesCode(t *testing.T) {
+func TestRegisterCreatesAccountAndAsksToVerify(t *testing.T) {
 	s := setupServer(t)
 	rec := s.do("GET", "/oauth/register?"+authParams().Encode(), nil)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `action="/oauth/register"`) {
 		t.Fatalf("register page: %d", rec.Code)
 	}
 
-	q := redirectQuery(t, s.do("POST", "/oauth/register",
-		with(authParams(), "email", "new@example.com", "password", "long enough")))
-	if q.Get("code") == "" || q.Get("state") != "st4te" {
-		t.Fatalf("redirect query %v", q)
+	rec = s.do("POST", "/oauth/register", with(authParams(), "email", "new@example.com", "password", "long enough"))
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK || rec.Header().Get("Location") != "" ||
+		!strings.Contains(body, "Check your email") || !strings.Contains(body, "new@example.com") {
+		t.Fatalf("after sign-up: %d %s", rec.Code, body)
+	}
+	if !strings.Contains(body, `action="/oauth/verify/resend"`) {
+		t.Error("no resend button")
+	}
+	if _, sent := s.mail.Last("new@example.com"); !sent {
+		t.Error("no verification email")
 	}
 
 	for name, c := range map[string]struct {
@@ -263,4 +270,106 @@ func TestRevokeEndpoint(t *testing.T) {
 	if _, err := s.svc.Refresh(t.Context(), "web", tokens.RefreshToken); err == nil {
 		t.Error("refresh token still works after revocation")
 	}
+}
+
+func contains(t *testing.T, rec *httptest.ResponseRecorder, status int, wants ...string) {
+	t.Helper()
+	if rec.Code != status {
+		t.Errorf("status %d, want %d", rec.Code, status)
+	}
+	for _, want := range wants {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Errorf("page lacks %q", want)
+		}
+	}
+	if t.Failed() {
+		t.Logf("page: %s", rec.Body)
+	}
+}
+
+func TestLoginWhileUnverified(t *testing.T) {
+	s := setupServer(t)
+	s.svc.Register(t.Context(), "new@example.com", "correct horse")
+
+	rec := s.do("POST", "/oauth/authorize", with(authParams(), "email", "new@example.com", "password", "correct horse"))
+	contains(t, rec, http.StatusForbidden, "Verify your email first", `action="/oauth/verify/resend"`,
+		`name="email" value="new@example.com"`)
+	if rec.Header().Get("Location") != "" {
+		t.Error("redirected with a code")
+	}
+
+	rec = s.do("POST", "/oauth/authorize", with(authParams(), "email", "new@example.com", "password", "wrong password"))
+	contains(t, rec, http.StatusUnauthorized, "Invalid email or password")
+	if strings.Contains(rec.Body.String(), "Verify your email") {
+		t.Error("a wrong password reveals that the account is unverified")
+	}
+}
+
+func TestResendVerification(t *testing.T) {
+	s := setupServer(t)
+	s.svc.cfg.MailLimit = 1
+	s.svc.Register(t.Context(), "new@example.com", "correct horse")
+
+	contains(t, s.do("POST", "/oauth/verify/resend", url.Values{"email": {"new@example.com"}}),
+		http.StatusOK, "Check your email", "new@example.com")
+	if _, sent := s.mail.Last("new@example.com"); !sent {
+		t.Error("no email sent")
+	}
+	contains(t, s.do("POST", "/oauth/verify/resend", url.Values{"email": {"new@example.com"}}),
+		http.StatusTooManyRequests, "Too many emails")
+}
+
+func TestVerifyLink(t *testing.T) {
+	s := setupServer(t)
+	s.svc.Register(t.Context(), "new@example.com", "correct horse")
+	s.svc.SendVerification(t.Context(), "new@example.com", "10.0.0.1")
+	token := s.tokenFrom(t, "new@example.com", "/oauth/verify")
+
+	contains(t, s.do("GET", "/oauth/verify?token="+token, nil), http.StatusOK, "Email verified", `href="/"`)
+	contains(t, s.do("GET", "/oauth/verify?token=nope", nil), http.StatusBadRequest,
+		"expired or is invalid", `action="/oauth/verify/resend"`, `name="email"`)
+}
+
+func TestLoginPageLinksToPasswordReset(t *testing.T) {
+	s := setupServer(t)
+	contains(t, s.do("GET", "/oauth/authorize?"+authParams().Encode(), nil), http.StatusOK, `href="/oauth/reset"`)
+}
+
+func TestForgotPassword(t *testing.T) {
+	s := setupServer(t)
+	s.register(t, "parent@example.com")
+	contains(t, s.do("GET", "/oauth/reset", nil), http.StatusOK, `action="/oauth/reset"`, `name="email"`)
+
+	for _, address := range []string{"parent@example.com", "nobody@example.com"} {
+		contains(t, s.do("POST", "/oauth/reset", url.Values{"email": {address}}), http.StatusOK,
+			"Check your email", "If an account exists for "+address)
+	}
+	if _, sent := s.mail.Last("parent@example.com"); !sent {
+		t.Error("no reset email for the account")
+	}
+	if _, sent := s.mail.Last("nobody@example.com"); sent {
+		t.Error("reset email sent to an address without an account")
+	}
+}
+
+func TestChooseNewPassword(t *testing.T) {
+	s := setupServer(t)
+	s.register(t, "parent@example.com")
+	s.svc.SendPasswordReset(t.Context(), "parent@example.com", "10.0.0.1")
+	token := s.tokenFrom(t, "parent@example.com", "/oauth/reset/confirm")
+
+	contains(t, s.do("GET", "/oauth/reset/confirm?token="+token, nil), http.StatusOK,
+		`action="/oauth/reset/confirm"`, `name="token" value="`+token+`"`, `name="password"`)
+	contains(t, s.do("GET", "/oauth/reset/confirm?token=nope", nil), http.StatusBadRequest,
+		"expired or was already used", `href="/oauth/reset"`)
+
+	contains(t, s.do("POST", "/oauth/reset/confirm", url.Values{"token": {token}, "password": {"short"}}),
+		http.StatusBadRequest, "at least 8 characters", `name="token" value="`+token+`"`)
+	contains(t, s.do("POST", "/oauth/reset/confirm", url.Values{"token": {token}, "password": {"a new password"}}),
+		http.StatusOK, "Password changed", `href="/"`)
+	if _, err := s.svc.Authenticate(t.Context(), "parent@example.com", "a new password", "10.0.0.1"); err != nil {
+		t.Errorf("new password: %v", err)
+	}
+	contains(t, s.do("POST", "/oauth/reset/confirm", url.Values{"token": {token}, "password": {"another password"}}),
+		http.StatusBadRequest, "expired or was already used")
 }

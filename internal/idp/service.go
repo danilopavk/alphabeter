@@ -21,12 +21,13 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+
+	"github.com/danilopavk/alphabeter/internal/email"
 )
 
 var (
@@ -40,6 +41,8 @@ var (
 	ErrInvalidChallenge   = errors.New("idp: code_challenge must be an S256 challenge")
 	ErrInvalidGrant       = errors.New("idp: invalid grant")
 	ErrInvalidToken       = errors.New("idp: invalid or expired token")
+	ErrEmailNotVerified   = errors.New("idp: email address not verified")
+	ErrInvalidLink        = errors.New("idp: link is invalid or has expired")
 )
 
 // Client is a registered OAuth client. All clients are public and must use PKCE.
@@ -56,6 +59,15 @@ type Config struct {
 	CodeTTL     time.Duration // default 60 s
 	LoginLimit  int           // failed-or-not login attempts per email and per IP; default 10
 	LoginWindow time.Duration // default 15 min
+
+	PublicURL      string        // for links in emails, e.g. https://alphabeter.example
+	MailFrom       string        // "Alphabeter <no-reply@alphabeter.example>"
+	Mailer         email.Sender  // default: email.Log (prints instead of sending)
+	MailLimit      int           // emails per address per MailWindow; default 5
+	MailLimitPerIP int           // emails requested per IP per MailWindow; default 20
+	MailWindow     time.Duration // default 1 h
+	VerifyTTL      time.Duration // verification links; default 24 h
+	ResetTTL       time.Duration // password reset links; default 1 h
 }
 
 type Tokens struct {
@@ -78,6 +90,14 @@ func NewService(pool *pgxpool.Pool, rdb *redis.Client, cfg Config) *Service {
 	cfg.CodeTTL = cmpOr(cfg.CodeTTL, time.Minute)
 	cfg.LoginLimit = cmpOr(cfg.LoginLimit, 10)
 	cfg.LoginWindow = cmpOr(cfg.LoginWindow, 15*time.Minute)
+	if cfg.Mailer == nil {
+		cfg.Mailer = email.Log{}
+	}
+	cfg.MailLimit = cmpOr(cfg.MailLimit, 5)
+	cfg.MailLimitPerIP = cmpOr(cfg.MailLimitPerIP, 20)
+	cfg.MailWindow = cmpOr(cfg.MailWindow, time.Hour)
+	cfg.VerifyTTL = cmpOr(cfg.VerifyTTL, 24*time.Hour)
+	cfg.ResetTTL = cmpOr(cfg.ResetTTL, time.Hour)
 	return &Service{pool: pool, rdb: rdb, cfg: cfg, now: time.Now}
 }
 
@@ -102,8 +122,8 @@ func (s *Service) Register(ctx context.Context, email, password string) (int64, 
 	if err != nil || addr.Address != email || len(email) > 254 {
 		return 0, ErrInvalidEmail
 	}
-	if n := utf8.RuneCountInString(password); n < 8 || n > 128 {
-		return 0, ErrWeakPassword
+	if err := validatePassword(password); err != nil {
+		return 0, err
 	}
 	hash, err := hashPassword(password)
 	if err != nil {
@@ -139,10 +159,13 @@ func (s *Service) Authenticate(ctx context.Context, email, password, ip string) 
 	}
 
 	var (
-		id   int64
-		hash string
+		id       int64
+		hash     string
+		verified bool
 	)
-	err := s.pool.QueryRow(ctx, `SELECT id, password_hash FROM users WHERE email = $1`, email).Scan(&id, &hash)
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, password_hash, email_verified_at IS NOT NULL FROM users WHERE email = $1`, email,
+	).Scan(&id, &hash, &verified)
 	if errors.Is(err, pgx.ErrNoRows) {
 		verifyPassword(dummyHash(), password)
 		return 0, ErrInvalidCredentials
@@ -152,6 +175,10 @@ func (s *Service) Authenticate(ctx context.Context, email, password, ip string) 
 	}
 	if !verifyPassword(hash, password) {
 		return 0, ErrInvalidCredentials
+	}
+	// Only reported after a correct password, so it reveals nothing to guessers.
+	if !verified {
+		return 0, ErrEmailNotVerified
 	}
 	s.rdb.Del(ctx, emailKey)
 	return id, nil
@@ -219,6 +246,15 @@ func (s *Service) IssueCode(ctx context.Context, userID int64, clientID, redirec
 	}
 	if !ValidChallenge(challenge) {
 		return "", ErrInvalidChallenge
+	}
+	var verified bool
+	if err := s.pool.QueryRow(ctx,
+		`SELECT email_verified_at IS NOT NULL FROM users WHERE id = $1`, userID,
+	).Scan(&verified); err != nil {
+		return "", err
+	}
+	if !verified {
+		return "", ErrEmailNotVerified
 	}
 	data, err := json.Marshal(codeData{userID, clientID, redirectURI, challenge})
 	if err != nil {
@@ -302,11 +338,14 @@ func (s *Service) Refresh(ctx context.Context, clientID, token string) (Tokens, 
 		family          [16]byte
 		expiresAt       time.Time
 		usedAt, revoked *time.Time
+		verified        bool
 	)
 	err = tx.QueryRow(ctx,
-		`SELECT user_id, client_id, family_id, expires_at, used_at, revoked_at
-		 FROM refresh_tokens WHERE token_hash = $1 FOR UPDATE`, hashToken(token),
-	).Scan(&userID, &tokenClient, &family, &expiresAt, &usedAt, &revoked)
+		`SELECT rt.user_id, rt.client_id, rt.family_id, rt.expires_at, rt.used_at, rt.revoked_at,
+		        u.email_verified_at IS NOT NULL
+		 FROM refresh_tokens rt JOIN users u ON u.id = rt.user_id
+		 WHERE rt.token_hash = $1 FOR UPDATE OF rt`, hashToken(token),
+	).Scan(&userID, &tokenClient, &family, &expiresAt, &usedAt, &revoked, &verified)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Tokens{}, ErrInvalidGrant
 	}
@@ -327,7 +366,7 @@ func (s *Service) Refresh(ctx context.Context, clientID, token string) (Tokens, 
 			return Tokens{}, err
 		}
 		return Tokens{}, ErrInvalidGrant
-	case tokenClient != clientID, !now.Before(expiresAt):
+	case tokenClient != clientID, !now.Before(expiresAt), !verified:
 		return Tokens{}, ErrInvalidGrant
 	}
 

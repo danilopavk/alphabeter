@@ -1,0 +1,21 @@
+{{define "title"}}{{.Title}}{{end}}
+
+{{define "content"}}
+<main class="card">
+  <p class="brand">Alphabeter</p>
+  <h1>{{.Title}}</h1>
+  <p>{{.Message}}</p>
+  {{with .Warning}}<p class="error" role="alert">{{.}}</p>{{end}}
+  {{if .Resend}}
+  <form method="post" action="/oauth/verify/resend" class="stack">
+    {{if .Email}}<input type="hidden" name="email" value="{{.Email}}">
+    {{else}}<label>Email
+      <input type="email" name="email" autocomplete="email" required>
+    </label>
+    {{end}}
+    <button type="submit">Send a new verification link</button>
+  </form>
+  {{end}}
+  {{with .LinkHref}}<p class="alt"><a href="{{.}}">{{$.LinkText}}</a></p>{{end}}
+</main>
+{{end}}

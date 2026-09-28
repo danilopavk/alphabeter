@@ -1,0 +1,17 @@
+{{define "title"}}Forgot your password{{end}}
+
+{{define "content"}}
+<main class="card">
+  <p class="brand">Alphabeter</p>
+  <h1>Forgot your password?</h1>
+  <p>Enter your email and we'll send you a link to choose a new one.</p>
+  {{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
+  <form method="post" action="/oauth/reset" class="stack">
+    <label>Email
+      <input type="email" name="email" value="{{.Email}}" autocomplete="email" required autofocus>
+    </label>
+    <button type="submit" class="primary">Send link</button>
+  </form>
+  <p class="alt"><a href="/">Back to log in</a></p>
+</main>
+{{end}}

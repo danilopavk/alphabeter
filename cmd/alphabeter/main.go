@@ -7,6 +7,8 @@
 //	COOKIE_SECURE  "false" to allow cookies over plain http (local development only)
 //	TRUST_PROXY    "true"/"false": take the visitor's IP from X-Forwarded-For.
 //	               Defaults to true on Railway (RAILWAY_PROJECT_ID set), false elsewhere.
+//	RESEND_API_KEY for sending emails; required on Railway. Without it, emails are
+//	               printed to the log instead (local development).
 package main
 
 import (
@@ -26,6 +28,7 @@ import (
 
 	"github.com/danilopavk/alphabeter/internal/app"
 	"github.com/danilopavk/alphabeter/internal/db"
+	"github.com/danilopavk/alphabeter/internal/email"
 )
 
 func main() {
@@ -63,10 +66,19 @@ func run() error {
 		return err
 	}
 
+	var mailer email.Sender = email.Log{}
+	if cfg.ResendAPIKey != "" {
+		mailer = &email.Resend{APIKey: cfg.ResendAPIKey}
+	} else {
+		slog.Warn("RESEND_API_KEY not set: emails are printed to the log, not sent")
+	}
+
 	a := app.New(app.Config{
 		BaseURL:       cfg.BaseURL,
 		SecureCookies: cfg.SecureCookies,
 		TrustProxy:    cfg.TrustProxy,
+		Mailer:        mailer,
+		MailFrom:      mailFrom,
 	}, pool, rdb)
 
 	go func() {
@@ -120,7 +132,11 @@ type config struct {
 	Addr          string
 	SecureCookies bool
 	TrustProxy    bool
+	ResendAPIKey  string
 }
+
+// mailFrom sends every email, locally too; it must be on the domain verified in Resend.
+const mailFrom = "Alphabeter <no-reply@alphabeter.org>"
 
 // loadConfig reads the environment. Missing required variables are all named
 // in one error; on Railway an unresolved variable reference arrives empty.
@@ -133,11 +149,16 @@ func loadConfig(getenv func(string) string) (config, error) {
 		Addr:          listenAddr(get),
 		SecureCookies: get("COOKIE_SECURE") != "false",
 		TrustProxy:    trustProxy(get),
+		ResendAPIKey:  get("RESEND_API_KEY"),
+	}
+	required := []struct{ key, value string }{
+		{"DATABASE_URL", cfg.DatabaseURL}, {"REDIS_URL", cfg.RedisURL}, {"BASE_URL", cfg.BaseURL},
+	}
+	if get("RAILWAY_PROJECT_ID") != "" {
+		required = append(required, struct{ key, value string }{"RESEND_API_KEY", cfg.ResendAPIKey})
 	}
 	var missing []string
-	for _, v := range []struct{ key, value string }{
-		{"DATABASE_URL", cfg.DatabaseURL}, {"REDIS_URL", cfg.RedisURL}, {"BASE_URL", cfg.BaseURL},
-	} {
+	for _, v := range required {
 		if v.value == "" {
 			missing = append(missing, v.key)
 		}

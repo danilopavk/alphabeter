@@ -4,6 +4,9 @@ export TEST_DATABASE_URL ?= $(DATABASE_URL)
 export TEST_REDIS_URL ?= redis://localhost:6379/1
 export BASE_URL ?= http://localhost:8090
 export COOKIE_SECURE ?= false
+# The shell's RESEND_API_KEY may belong to another project. Locally the app's key
+# comes from ALPHABETER_RESEND_API_KEY; unset, emails are printed to the terminal.
+export RESEND_API_KEY := $(ALPHABETER_RESEND_API_KEY)
 
 .PHONY: up down test run backup-test
 

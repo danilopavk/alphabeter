@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/danilopavk/alphabeter/internal/email"
 	"github.com/danilopavk/alphabeter/internal/testutil"
 )
 
@@ -25,24 +26,32 @@ func challengeFor(verifier string) string {
 type fixture struct {
 	svc   *Service
 	clock time.Time
+	mail  *email.Recorder
 }
 
 func setup(t *testing.T) *fixture {
 	pool := testutil.Postgres(t)
 	rdb, prefix := testutil.Redis(t)
-	f := &fixture{clock: time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)}
+	f := &fixture{clock: time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC), mail: &email.Recorder{}}
 	f.svc = NewService(pool, rdb, Config{
 		KeyPrefix: prefix,
 		Clients:   []Client{{ID: "web", RedirectURIs: []string{testRedirect}}},
+		PublicURL: "https://alphabeter.test",
+		MailFrom:  "Alphabeter <no-reply@alphabeter.test>",
+		Mailer:    f.mail,
 	})
 	f.svc.now = func() time.Time { return f.clock }
 	return f
 }
 
-func (f *fixture) register(t *testing.T, email string) int64 {
+// register creates a verified account with the password "correct horse".
+func (f *fixture) register(t *testing.T, address string) int64 {
 	t.Helper()
-	id, err := f.svc.Register(context.Background(), email, "correct horse")
+	id, err := f.svc.Register(context.Background(), address, "correct horse")
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.pool.Exec(context.Background(), `UPDATE users SET email_verified_at = now() WHERE id = $1`, id); err != nil {
 		t.Fatal(err)
 	}
 	return id

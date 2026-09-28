@@ -1,0 +1,16 @@
+{{define "title"}}Choose a new password{{end}}
+
+{{define "content"}}
+<main class="card">
+  <p class="brand">Alphabeter</p>
+  <h1>Choose a new password</h1>
+  {{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
+  <form method="post" action="/oauth/reset/confirm" class="stack">
+    <input type="hidden" name="token" value="{{.Token}}">
+    <label>New password <span class="hint">at least 8 characters</span>
+      <input type="password" name="password" autocomplete="new-password" minlength="8" maxlength="128" required autofocus>
+    </label>
+    <button type="submit" class="primary">Save password</button>
+  </form>
+</main>
+{{end}}

@@ -6,7 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - `make up` / `make down`: start/stop Postgres and Redis (docker compose)
 - `make test`: start them, then `go test -race ./...`
-- `make run`: run the app on http://localhost:8090
+- `make run`: run the app on http://localhost:8090. It takes the Resend key from
+  `ALPHABETER_RESEND_API_KEY` (the shell's `RESEND_API_KEY` belongs to another project); without
+  it, emails and their links are printed to the terminal.
 - `make backup-test`: end-to-end test of the backup job (needs Docker)
 - One test: `go test ./internal/game -run TestRetirement`. Tests that need Postgres/Redis skip
   unless `TEST_DATABASE_URL` and `TEST_REDIS_URL` are set (the Makefile sets both).

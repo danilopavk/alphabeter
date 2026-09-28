@@ -5,6 +5,12 @@
   <p class="brand">Alphabeter</p>
   <h1>Log in</h1>
   {{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
+  {{with .Resend}}
+  <form method="post" action="/oauth/verify/resend" class="stack resend">
+    <input type="hidden" name="email" value="{{.}}">
+    <button type="submit">Send a new verification link</button>
+  </form>
+  {{end}}
   <form method="post" action="/oauth/authorize" class="stack">
     {{range .Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">
     {{end}}
@@ -16,6 +22,7 @@
     </label>
     <button type="submit" class="primary">Log in</button>
   </form>
+  <p class="alt"><a href="/oauth/reset">Forgot your password?</a></p>
   <p class="alt">New here? <a href="{{.AltURL}}">Create an account</a></p>
 </main>
 {{end}}

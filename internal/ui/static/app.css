@@ -70,6 +70,8 @@ button:disabled { opacity: .5; cursor: default; }
   color: var(--danger);
 }
 .alt { margin-top: 1.5rem; color: var(--muted); }
+.alt + .alt { margin-top: .5rem; }
+.resend { margin-bottom: 1.5rem; }
 
 /* Kids */
 .topbar { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 1.25rem; }

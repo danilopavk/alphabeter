@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/danilopavk/alphabeter/internal/app"
+	"github.com/danilopavk/alphabeter/internal/email"
 	"github.com/danilopavk/alphabeter/internal/game"
 	"github.com/danilopavk/alphabeter/internal/testutil"
 )
@@ -29,6 +30,7 @@ type env struct {
 	base string
 	app  *app.App
 	pool *pgxpool.Pool
+	mail *email.Recorder
 }
 
 func start(t *testing.T, options ...func(*app.Config)) *env {
@@ -39,7 +41,8 @@ func start(t *testing.T, options ...func(*app.Config)) *env {
 		t.Fatal(err)
 	}
 	base := "http://" + ln.Addr().String()
-	cfg := app.Config{BaseURL: base, KeyPrefix: prefix}
+	mail := &email.Recorder{}
+	cfg := app.Config{BaseURL: base, KeyPrefix: prefix, Mailer: mail, MailFrom: "Alphabeter <no-reply@alphabeter.test>"}
 	for _, option := range options {
 		option(&cfg)
 	}
@@ -49,7 +52,7 @@ func start(t *testing.T, options ...func(*app.Config)) *env {
 	srv.Listener = ln
 	srv.Start()
 	t.Cleanup(srv.Close)
-	return &env{t: t, base: base, app: a, pool: pool}
+	return &env{t: t, base: base, app: a, pool: pool, mail: mail}
 }
 
 // browser is a cookie-keeping client. follow decides whether it follows redirects.
@@ -121,20 +124,66 @@ func (b *browser) cookie(name string) string {
 }
 
 // signUp registers through the real login redirect chain and lands on /kids.
-func (b *browser) signUp(email string) {
+// signUp registers, opens the emailed verification link and logs in, landing on /kids.
+func (b *browser) signUp(address string) {
+	b.env.t.Helper()
+	b.register(address)
+	b.openLink(address, "/oauth/verify")
+	b.logIn(address, "correct horse")
+}
+
+// loginForm follows the redirects from /kids to the login page and returns its OAuth parameters.
+func (b *browser) loginForm() url.Values {
 	t := b.env.t
 	t.Helper()
 	page := b.get("/kids")
 	if page.Request.URL.Path != "/oauth/authorize" {
 		t.Fatalf("unauthenticated /kids ended at %s", page.Request.URL)
 	}
-	form := page.Request.URL.Query()
-	form.Set("email", email)
+	return page.Request.URL.Query()
+}
+
+func (b *browser) register(address string) response {
+	t := b.env.t
+	t.Helper()
+	form := b.loginForm()
+	form.Set("email", address)
 	form.Set("password", "correct horse")
-	kids := b.post("/oauth/register", form)
-	if kids.StatusCode != http.StatusOK || kids.Request.URL.Path != "/kids" {
-		t.Fatalf("sign-up ended at %s with %d: %s", kids.Request.URL, kids.StatusCode, kids.body)
+	res := b.post("/oauth/register", form)
+	if res.StatusCode != http.StatusOK || !strings.Contains(res.body, "Check your email") {
+		t.Fatalf("sign-up: %d %s", res.StatusCode, res.body)
 	}
+	return res
+}
+
+var tokenLink = regexp.MustCompile(`https?://[^\s"]+\?token=[A-Za-z0-9_-]+`)
+
+// openLink opens the link in the last email sent to the address; path is what the link must lead to.
+func (b *browser) openLink(address, path string) response {
+	t := b.env.t
+	t.Helper()
+	m, ok := b.env.mail.Last(address)
+	if !ok {
+		t.Fatalf("no email for %s", address)
+	}
+	link := tokenLink.FindString(m.Text)
+	if !strings.HasPrefix(link, b.env.base+path+"?token=") {
+		t.Fatalf("email link %q does not lead to %s", link, path)
+	}
+	return b.get(strings.TrimPrefix(link, b.env.base))
+}
+
+func (b *browser) logIn(address, password string) response {
+	t := b.env.t
+	t.Helper()
+	form := b.loginForm()
+	form.Set("email", address)
+	form.Set("password", password)
+	kids := b.post("/oauth/authorize", form)
+	if kids.StatusCode != http.StatusOK || kids.Request.URL.Path != "/kids" {
+		t.Fatalf("login ended at %s with %d: %s", kids.Request.URL, kids.StatusCode, kids.body)
+	}
+	return kids
 }
 
 var kidIDPattern = regexp.MustCompile(`/kids/(\d+)(?:-[^/"]*)?/play`)
@@ -182,15 +231,16 @@ func TestLoginRedirectStartsPKCEFlow(t *testing.T) {
 	}
 }
 
-func TestSignUpSetsSessionCookies(t *testing.T) {
+func TestLoginSetsSessionCookies(t *testing.T) {
 	e := start(t)
 	b := e.browser()
-	page := b.get("/kids")
-	form := page.Request.URL.Query()
+	b.register("parent@example.com")
+	b.openLink("parent@example.com", "/oauth/verify")
+	form := b.loginForm()
 	form.Set("email", "parent@example.com")
 	form.Set("password", "correct horse")
 
-	res := b.do(b.single, "POST", "/oauth/register", form) // → 302 to /auth/callback
+	res := b.do(b.single, "POST", "/oauth/authorize", form) // → 302 to /auth/callback
 	res = b.do(b.single, "GET", strings.TrimPrefix(res.Header.Get("Location"), e.base), nil)
 	if res.StatusCode != http.StatusSeeOther || res.Header.Get("Location") != "/kids" {
 		t.Fatalf("callback: %d → %s: %s", res.StatusCode, res.Header.Get("Location"), res.body)
@@ -210,6 +260,75 @@ func TestSignUpSetsSessionCookies(t *testing.T) {
 	}
 	if res := b.get("/kids"); res.StatusCode != http.StatusOK || !strings.Contains(res.body, "Add a kid") {
 		t.Errorf("/kids after login: %d", res.StatusCode)
+	}
+}
+
+func TestSignUpRequiresVerification(t *testing.T) {
+	e := start(t)
+	b := e.browser()
+	b.register("parent@example.com")
+
+	form := b.loginForm()
+	form.Set("email", "parent@example.com")
+	form.Set("password", "correct horse")
+	res := b.post("/oauth/authorize", form)
+	if res.StatusCode != http.StatusForbidden || !strings.Contains(res.body, "Verify your email first") {
+		t.Fatalf("login before verifying: %d %s", res.StatusCode, res.body)
+	}
+	if b.cookie("at") != "" {
+		t.Error("got a session before verifying")
+	}
+
+	first, _ := e.mail.Last("parent@example.com")
+	res = b.post("/oauth/verify/resend", url.Values{"email": {"parent@example.com"}})
+	if !strings.Contains(res.body, "Check your email") {
+		t.Fatalf("resend: %d %s", res.StatusCode, res.body)
+	}
+	if again, _ := e.mail.Last("parent@example.com"); again.Text == first.Text {
+		t.Error("resend did not send a new link")
+	}
+	if res := b.openLink("parent@example.com", "/oauth/verify"); !strings.Contains(res.body, "Email verified") {
+		t.Fatalf("verify: %d %s", res.StatusCode, res.body)
+	}
+	b.logIn("parent@example.com", "correct horse")
+}
+
+func TestPasswordReset(t *testing.T) {
+	e := start(t)
+	phone := e.browser()
+	phone.signUp("parent@example.com")
+
+	laptop := e.browser()
+	res := laptop.post("/oauth/reset", url.Values{"email": {"parent@example.com"}})
+	if !strings.Contains(res.body, "Check your email") {
+		t.Fatalf("request reset: %d %s", res.StatusCode, res.body)
+	}
+	res = laptop.openLink("parent@example.com", "/oauth/reset/confirm")
+	token := regexp.MustCompile(`name="token" value="([^"]+)"`).FindStringSubmatch(res.body)
+	if token == nil {
+		t.Fatalf("no reset form: %s", res.body)
+	}
+	res = laptop.post("/oauth/reset/confirm", url.Values{"token": {token[1]}, "password": {"a new password"}})
+	if !strings.Contains(res.body, "Password changed") {
+		t.Fatalf("reset: %d %s", res.StatusCode, res.body)
+	}
+	laptop.logIn("parent@example.com", "a new password")
+
+	// The phone's session ends once its access token expires.
+	e.app.IDP.Revoke(context.Background(), phone.cookie("at"))
+	if res := phone.do(phone.single, "GET", "/kids", nil); res.StatusCode != http.StatusSeeOther {
+		t.Errorf("phone still logged in after the reset: %d", res.StatusCode)
+	}
+}
+
+func TestUnverifiedAccountsAreLoggedOut(t *testing.T) {
+	e := start(t)
+	b := e.browser()
+	b.signUp("parent@example.com")
+	e.pool.Exec(context.Background(), `UPDATE users SET email_verified_at = NULL`)
+	e.app.IDP.Revoke(context.Background(), b.cookie("at")) // as if the access token expired
+	if res := b.do(b.single, "GET", "/kids", nil); res.StatusCode != http.StatusSeeOther {
+		t.Errorf("unverified account still logged in: %d", res.StatusCode)
 	}
 }
 

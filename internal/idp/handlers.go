@@ -28,6 +28,13 @@ func (h *Handler) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /oauth/register", h.register)
 	mux.HandleFunc("POST /oauth/token", h.token)
 	mux.HandleFunc("POST /oauth/revoke", h.revoke)
+
+	mux.HandleFunc("GET /oauth/verify", h.verifyEmail)
+	mux.HandleFunc("POST /oauth/verify/resend", h.resendVerification)
+	mux.HandleFunc("GET /oauth/reset", h.showForgot)
+	mux.HandleFunc("POST /oauth/reset", h.forgot)
+	mux.HandleFunc("GET /oauth/reset/confirm", h.showReset)
+	mux.HandleFunc("POST /oauth/reset/confirm", h.reset)
 }
 
 // authRequest is the authorization request. The login and registration forms
@@ -113,14 +120,15 @@ type formPage struct {
 	Email  string
 	Error  string
 	AltURL string
+	Resend string // offer to resend the verification email to this address
 }
 
 func (h *Handler) renderLogin(w http.ResponseWriter, status int, a authRequest, email, message string) {
-	h.ui.Page(w, status, "login", formPage{a.fields(), email, message, "/oauth/register?" + a.query()})
+	h.ui.Page(w, status, "login", formPage{Hidden: a.fields(), Email: email, Error: message, AltURL: "/oauth/register?" + a.query()})
 }
 
 func (h *Handler) renderRegister(w http.ResponseWriter, status int, a authRequest, email, message string) {
-	h.ui.Page(w, status, "register", formPage{a.fields(), email, message, "/oauth/authorize?" + a.query()})
+	h.ui.Page(w, status, "register", formPage{Hidden: a.fields(), Email: email, Error: message, AltURL: "/oauth/authorize?" + a.query()})
 }
 
 func (h *Handler) showLogin(w http.ResponseWriter, r *http.Request) {
@@ -150,6 +158,11 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		h.renderLogin(w, http.StatusUnauthorized, a, email, "Invalid email or password.")
 	case errors.Is(err, ErrRateLimited):
 		h.renderLogin(w, http.StatusTooManyRequests, a, email, "Too many attempts. Try again in a few minutes.")
+	case errors.Is(err, ErrEmailNotVerified):
+		h.ui.Page(w, http.StatusForbidden, "login", formPage{
+			Hidden: a.fields(), Email: email, AltURL: "/oauth/register?" + a.query(), Resend: normalizeEmail(email),
+			Error: "Verify your email first: open the link we sent you, or get a new one.",
+		})
 	case err != nil:
 		h.serverError(w, err)
 	default:
@@ -164,7 +177,7 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	email := r.PostForm.Get("email")
-	userID, err := h.svc.Register(r.Context(), email, r.PostForm.Get("password"))
+	_, err := h.svc.Register(r.Context(), email, r.PostForm.Get("password"))
 	switch {
 	case errors.Is(err, ErrEmailTaken):
 		h.renderRegister(w, http.StatusBadRequest, a, email, "That email is already registered. Log in instead?")
@@ -175,7 +188,7 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		h.serverError(w, err)
 	default:
-		h.issueCode(w, r, a, userID)
+		h.sendVerification(w, r, normalizeEmail(email))
 	}
 }
 
@@ -261,4 +274,128 @@ func clientIP(r *http.Request) string {
 		return r.RemoteAddr
 	}
 	return host
+}
+
+// --- email verification and password reset pages ---
+
+// noticePage is a short message with an optional link or resend button.
+type noticePage struct {
+	Title, Message, Warning string
+	LinkHref, LinkText      string
+	Resend                  bool   // show the "send a new verification link" button
+	Email                   string // resend to this address; empty = ask for it
+}
+
+func (h *Handler) notice(w http.ResponseWriter, status int, p noticePage) {
+	h.ui.Page(w, status, "notice", p)
+}
+
+// sendVerification emails a verification link and shows "Check your email".
+func (h *Handler) sendVerification(w http.ResponseWriter, r *http.Request, email string) {
+	page := noticePage{
+		Title:   "Check your email",
+		Message: "We sent a link to " + email + ". Open it to finish signing up, then log in.",
+		Resend:  true,
+		Email:   email,
+	}
+	switch err := h.svc.SendVerification(r.Context(), email, clientIP(r)); {
+	case errors.Is(err, ErrRateLimited):
+		page.Warning = "Too many emails to this address. Try again in an hour."
+		page.Resend = false
+		h.notice(w, http.StatusTooManyRequests, page)
+	case err != nil:
+		slog.Error("send verification email", "err", err)
+		page.Warning = "We couldn't send the email just now. Try the button below in a minute."
+		h.notice(w, http.StatusOK, page)
+	default:
+		h.notice(w, http.StatusOK, page)
+	}
+}
+
+func (h *Handler) resendVerification(w http.ResponseWriter, r *http.Request) {
+	r.ParseForm()
+	h.sendVerification(w, r, normalizeEmail(r.PostForm.Get("email")))
+}
+
+func (h *Handler) verifyEmail(w http.ResponseWriter, r *http.Request) {
+	switch err := h.svc.VerifyEmail(r.Context(), r.URL.Query().Get("token")); {
+	case errors.Is(err, ErrInvalidLink):
+		h.notice(w, http.StatusBadRequest, noticePage{
+			Title:   "Link expired",
+			Message: "This link has expired or is invalid. Enter your email to get a new one.",
+			Resend:  true,
+		})
+	case err != nil:
+		h.serverError(w, err)
+	default:
+		h.notice(w, http.StatusOK, noticePage{
+			Title: "Email verified", Message: "Thanks! Your account is ready.", LinkHref: "/", LinkText: "Log in",
+		})
+	}
+}
+
+type forgotPage struct{ Email, Error string }
+
+func (h *Handler) showForgot(w http.ResponseWriter, r *http.Request) {
+	h.ui.Page(w, http.StatusOK, "forgot", forgotPage{})
+}
+
+func (h *Handler) forgot(w http.ResponseWriter, r *http.Request) {
+	r.ParseForm()
+	email := normalizeEmail(r.PostForm.Get("email"))
+	switch err := h.svc.SendPasswordReset(r.Context(), email, clientIP(r)); {
+	case errors.Is(err, ErrRateLimited):
+		h.ui.Page(w, http.StatusTooManyRequests, "forgot", forgotPage{email, "Too many emails. Try again in an hour."})
+	case err != nil:
+		slog.Error("send password reset email", "err", err)
+		h.ui.Page(w, http.StatusInternalServerError, "forgot", forgotPage{email, "We couldn't send the email just now. Try again in a minute."})
+	default:
+		h.notice(w, http.StatusOK, noticePage{
+			Title:   "Check your email",
+			Message: "If an account exists for " + email + ", we've sent it a link to choose a new password. The link works for 1 hour.",
+		})
+	}
+}
+
+type resetPage struct{ Token, Error string }
+
+func (h *Handler) expiredResetLink(w http.ResponseWriter) {
+	h.notice(w, http.StatusBadRequest, noticePage{
+		Title:    "Link expired",
+		Message:  "This link has expired or was already used.",
+		LinkHref: "/oauth/reset",
+		LinkText: "Get a new link",
+	})
+}
+
+func (h *Handler) showReset(w http.ResponseWriter, r *http.Request) {
+	token := r.URL.Query().Get("token")
+	switch err := h.svc.CheckResetLink(r.Context(), token); {
+	case errors.Is(err, ErrInvalidLink):
+		h.expiredResetLink(w)
+	case err != nil:
+		h.serverError(w, err)
+	default:
+		h.ui.Page(w, http.StatusOK, "reset", resetPage{Token: token})
+	}
+}
+
+func (h *Handler) reset(w http.ResponseWriter, r *http.Request) {
+	r.ParseForm()
+	token := r.PostForm.Get("token")
+	switch err := h.svc.ResetPassword(r.Context(), token, r.PostForm.Get("password")); {
+	case errors.Is(err, ErrWeakPassword):
+		h.ui.Page(w, http.StatusBadRequest, "reset", resetPage{token, "Use at least 8 characters (and at most 128) for the password."})
+	case errors.Is(err, ErrInvalidLink):
+		h.expiredResetLink(w)
+	case err != nil:
+		h.serverError(w, err)
+	default:
+		h.notice(w, http.StatusOK, noticePage{
+			Title:    "Password changed",
+			Message:  "You can now log in with your new password. Any other devices were logged out.",
+			LinkHref: "/",
+			LinkText: "Log in",
+		})
+	}
 }

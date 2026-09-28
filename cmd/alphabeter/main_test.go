@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"net/mail"
+	"strings"
+	"testing"
+)
 
 func envOf(vars map[string]string) func(string) string {
 	return func(key string) string { return vars[key] }
@@ -87,7 +91,7 @@ func TestLoadConfig(t *testing.T) {
 func TestLoadConfigCookieAndProxySettings(t *testing.T) {
 	env := map[string]string{
 		"DATABASE_URL": "postgres://x", "REDIS_URL": "redis://x", "BASE_URL": "http://localhost:8090",
-		"COOKIE_SECURE": "false", "RAILWAY_PROJECT_ID": "abc",
+		"COOKIE_SECURE": "false", "RAILWAY_PROJECT_ID": "abc", "RESEND_API_KEY": "re_x",
 	}
 	cfg, err := loadConfig(envOf(env))
 	if err != nil {
@@ -95,5 +99,39 @@ func TestLoadConfigCookieAndProxySettings(t *testing.T) {
 	}
 	if cfg.SecureCookies || !cfg.TrustProxy {
 		t.Errorf("secure cookies %v, trust proxy %v", cfg.SecureCookies, cfg.TrustProxy)
+	}
+}
+
+func TestLoadConfigEmail(t *testing.T) {
+	base := map[string]string{"DATABASE_URL": "postgres://x", "REDIS_URL": "redis://x", "BASE_URL": "http://localhost:8090"}
+	with := func(kv ...string) map[string]string {
+		env := map[string]string{}
+		for k, v := range base {
+			env[k] = v
+		}
+		for i := 0; i < len(kv); i += 2 {
+			env[kv[i]] = kv[i+1]
+		}
+		return env
+	}
+
+	cfg, err := loadConfig(envOf(base))
+	if err != nil || cfg.ResendAPIKey != "" {
+		t.Errorf("locally without a key: %+v, %v", cfg, err)
+	}
+	cfg, err = loadConfig(envOf(with("RESEND_API_KEY", " re_123 \n")))
+	if err != nil || cfg.ResendAPIKey != "re_123" {
+		t.Errorf("with a key: %+v, %v", cfg, err)
+	}
+	_, err = loadConfig(envOf(with("RAILWAY_PROJECT_ID", "abc")))
+	if err == nil || err.Error() != "missing environment variables: RESEND_API_KEY" {
+		t.Errorf("on Railway without a key: err = %v", err)
+	}
+}
+
+func TestMailFromIsOnTheResendDomain(t *testing.T) {
+	addr, err := mail.ParseAddress(mailFrom)
+	if err != nil || !strings.HasSuffix(addr.Address, "@alphabeter.org") {
+		t.Errorf("mailFrom %q: %v", mailFrom, err)
 	}
 }
