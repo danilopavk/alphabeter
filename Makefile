@@ -5,7 +5,7 @@ export TEST_REDIS_URL ?= redis://localhost:6379/1
 export BASE_URL ?= http://localhost:8090
 export COOKIE_SECURE ?= false
 
-.PHONY: up down test run
+.PHONY: up down test run backup-test
 
 up:
 	docker compose up -d --wait
@@ -18,3 +18,6 @@ test: up
 
 run: up
 	go run ./cmd/alphabeter
+
+backup-test:
+	sh backup/test.sh

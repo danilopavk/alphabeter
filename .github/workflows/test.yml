@@ -65,3 +65,14 @@ jobs:
 
       - name: Test
         run: go test -race ./...
+
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Lint scripts
+        run: shellcheck backup/*.sh
+
+      - name: Back up and restore
+        run: sh backup/test.sh

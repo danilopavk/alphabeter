@@ -7,6 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `make up` / `make down`: start/stop Postgres and Redis (docker compose)
 - `make test`: start them, then `go test -race ./...`
 - `make run`: run the app on http://localhost:8090
+- `make backup-test`: end-to-end test of the backup job (needs Docker)
 - One test: `go test ./internal/game -run TestRetirement`. Tests that need Postgres/Redis skip
   unless `TEST_DATABASE_URL` and `TEST_REDIS_URL` are set (the Makefile sets both).
 
@@ -35,7 +36,8 @@ auth codes, login rate limits). Templates and static files are embedded.
   and keeps the tokens in cookies. Pages use htmx fragments.
 - `internal/ui`: templates and static assets; asset URLs carry a content hash (`{{asset}}`).
 - `internal/clientip`: the visitor's IP behind Railway's proxy and Cloudflare.
+- `backup/`: the daily backup, a separate Railway cron service: `pg_dump` uploaded to Cloudflare R2.
 - `internal/app`: wires it all into one handler. Configuration (environment variables) is
   documented at the top of `cmd/alphabeter/main.go`.
 
-Production is planned on Railway behind Cloudflare, with Resend for email.
+Production runs on Railway behind Cloudflare, with Resend for email.
