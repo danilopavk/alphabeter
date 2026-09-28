@@ -1,8 +1,8 @@
 // Command alphabeter runs the web app. It is configured by environment variables:
 //
-//	DATABASE_URL   Postgres connection URL
-//	REDIS_URL      Redis/Valkey connection URL (Redis 7+: uses EXPIRE NX)
-//	BASE_URL       public URL, e.g. https://alphabeter.example (default http://localhost:8090)
+//	DATABASE_URL   required: Postgres connection URL
+//	REDIS_URL      required: Redis/Valkey connection URL (Redis 7+: uses EXPIRE NX)
+//	BASE_URL       required: public URL, e.g. https://alphabeter.example
 //	ADDR           listen address; otherwise :$PORT; otherwise :8090
 //	COOKIE_SECURE  "false" to allow cookies over plain http (local development only)
 //	TRUST_PROXY    "true"/"false": take the visitor's IP from X-Forwarded-For.
@@ -12,8 +12,10 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -37,10 +39,12 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	addr := listenAddr(os.Getenv)
-	baseURL := strings.TrimSuffix(env("BASE_URL", "http://localhost:8090"), "/")
+	cfg, err := loadConfig(os.Getenv)
+	if err != nil {
+		return err
+	}
 
-	pool, err := db.Open(ctx, env("DATABASE_URL", "postgres://alphabeter:alphabeter@localhost:5432/alphabeter?sslmode=disable"))
+	pool, err := db.Open(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return err
 	}
@@ -49,7 +53,7 @@ func run() error {
 		return err
 	}
 
-	redisOpts, err := redis.ParseURL(env("REDIS_URL", "redis://localhost:6379/0"))
+	redisOpts, err := redis.ParseURL(cfg.RedisURL)
 	if err != nil {
 		return err
 	}
@@ -60,9 +64,9 @@ func run() error {
 	}
 
 	a := app.New(app.Config{
-		BaseURL:       baseURL,
-		SecureCookies: env("COOKIE_SECURE", "true") != "false",
-		TrustProxy:    trustProxy(os.Getenv),
+		BaseURL:       cfg.BaseURL,
+		SecureCookies: cfg.SecureCookies,
+		TrustProxy:    cfg.TrustProxy,
 	}, pool, rdb)
 
 	go func() {
@@ -83,7 +87,7 @@ func run() error {
 	}()
 
 	srv := &http.Server{
-		Addr:              addr,
+		Addr:              cfg.Addr,
 		Handler:           a.Handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
@@ -92,7 +96,7 @@ func run() error {
 	}
 	errc := make(chan error, 1)
 	go func() {
-		slog.Info("listening", "addr", addr, "base_url", baseURL, "trust_proxy", trustProxy(os.Getenv))
+		slog.Info("listening", "addr", cfg.Addr, "base_url", cfg.BaseURL, "trust_proxy", cfg.TrustProxy)
 		errc <- srv.ListenAndServe()
 	}()
 
@@ -107,6 +111,44 @@ func run() error {
 		return err
 	}
 	return nil
+}
+
+type config struct {
+	DatabaseURL   string
+	RedisURL      string
+	BaseURL       string // without trailing slash
+	Addr          string
+	SecureCookies bool
+	TrustProxy    bool
+}
+
+// loadConfig reads the environment. Missing required variables are all named
+// in one error; on Railway an unresolved variable reference arrives empty.
+func loadConfig(getenv func(string) string) (config, error) {
+	get := func(key string) string { return strings.TrimSpace(getenv(key)) }
+	cfg := config{
+		DatabaseURL:   get("DATABASE_URL"),
+		RedisURL:      get("REDIS_URL"),
+		BaseURL:       strings.TrimSuffix(get("BASE_URL"), "/"),
+		Addr:          listenAddr(get),
+		SecureCookies: get("COOKIE_SECURE") != "false",
+		TrustProxy:    trustProxy(get),
+	}
+	var missing []string
+	for _, v := range []struct{ key, value string }{
+		{"DATABASE_URL", cfg.DatabaseURL}, {"REDIS_URL", cfg.RedisURL}, {"BASE_URL", cfg.BaseURL},
+	} {
+		if v.value == "" {
+			missing = append(missing, v.key)
+		}
+	}
+	if len(missing) > 0 {
+		return config{}, fmt.Errorf("missing environment variables: %s", strings.Join(missing, ", "))
+	}
+	if u, err := url.Parse(cfg.BaseURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return config{}, fmt.Errorf("BASE_URL must be an absolute http(s) URL, got %q", cfg.BaseURL)
+	}
+	return cfg, nil
 }
 
 // listenAddr is ADDR if set, else :$PORT (set by hosting platforms), else :8090.
@@ -130,11 +172,4 @@ func trustProxy(getenv func(string) string) bool {
 		return false
 	}
 	return getenv("RAILWAY_PROJECT_ID") != ""
-}
-
-func env(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
 }

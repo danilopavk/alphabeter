@@ -38,3 +38,62 @@ func TestTrustProxy(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadConfig(t *testing.T) {
+	full := map[string]string{
+		"DATABASE_URL": "postgres://u:p@postgres.railway.internal:5432/railway\n\n",
+		"REDIS_URL":    "  redis://default:p@redis.railway.internal:6379 ",
+		"BASE_URL":     "https://alphabeter.example/",
+		"PORT":         "8080",
+	}
+	cfg, err := loadConfig(envOf(full))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := config{
+		DatabaseURL:   "postgres://u:p@postgres.railway.internal:5432/railway",
+		RedisURL:      "redis://default:p@redis.railway.internal:6379",
+		BaseURL:       "https://alphabeter.example",
+		Addr:          ":8080",
+		SecureCookies: true,
+	}
+	if cfg != want {
+		t.Errorf("config = %+v\nwant %+v", cfg, want)
+	}
+
+	cases := []struct {
+		name string
+		env  map[string]string
+		want string
+	}{
+		{"nothing set", nil, "missing environment variables: DATABASE_URL, REDIS_URL, BASE_URL"},
+		{"an unresolved Railway reference is empty", map[string]string{
+			"DATABASE_URL": "", "REDIS_URL": "redis://x", "BASE_URL": "https://a.example"},
+			"missing environment variables: DATABASE_URL"},
+		{"whitespace only", map[string]string{
+			"DATABASE_URL": "postgres://x", "REDIS_URL": " \n", "BASE_URL": "https://a.example"},
+			"missing environment variables: REDIS_URL"},
+		{"BASE_URL without a scheme", map[string]string{
+			"DATABASE_URL": "postgres://x", "REDIS_URL": "redis://x", "BASE_URL": "alphabeter.example"},
+			`BASE_URL must be an absolute http(s) URL, got "alphabeter.example"`},
+	}
+	for _, c := range cases {
+		if _, err := loadConfig(envOf(c.env)); err == nil || err.Error() != c.want {
+			t.Errorf("%s: err = %v, want %q", c.name, err, c.want)
+		}
+	}
+}
+
+func TestLoadConfigCookieAndProxySettings(t *testing.T) {
+	env := map[string]string{
+		"DATABASE_URL": "postgres://x", "REDIS_URL": "redis://x", "BASE_URL": "http://localhost:8090",
+		"COOKIE_SECURE": "false", "RAILWAY_PROJECT_ID": "abc",
+	}
+	cfg, err := loadConfig(envOf(env))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SecureCookies || !cfg.TrustProxy {
+		t.Errorf("secure cookies %v, trust proxy %v", cfg.SecureCookies, cfg.TrustProxy)
+	}
+}
