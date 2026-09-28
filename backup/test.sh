@@ -94,7 +94,13 @@ out=$(docker run --rm -e S3_BUCKET=backups "$image" 2>&1) && fail "backup withou
 echo "$out" | grep -q "missing environment variables: DATABASE_URL S3_ENDPOINT S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY" ||
 	fail "unexpected message: $out"
 
-echo "a rejected upload fails the job"
-backup -e S3_SECRET_ACCESS_KEY=wrong >/dev/null 2>&1 && fail "backup with a wrong secret succeeded"
+echo "pasted settings with stray whitespace still work"
+backup -e S3_ACCESS_KEY_ID=" $access_key " -e S3_SECRET_ACCESS_KEY="$secret_key
+" -e S3_BUCKET="backups " >/dev/null 2>&1 || fail "backup with whitespace around settings failed"
+
+echo "a rejected upload fails the job and shows the storage's reason"
+out=$(backup -e S3_SECRET_ACCESS_KEY=wrong 2>&1) && fail "backup with a wrong secret succeeded"
+echo "$out" | grep -q "backup: upload failed" || fail "no upload failure message: $out"
+echo "$out" | grep -q "<Code>SignatureDoesNotMatch</Code>" || fail "storage's error not shown: $out"
 
 echo "PASS"
