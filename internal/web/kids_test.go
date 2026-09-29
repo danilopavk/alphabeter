@@ -1,6 +1,7 @@
 package web
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/danilopavk/alphabeter/internal/game"
@@ -87,34 +88,63 @@ func TestFlash(t *testing.T) {
 	}
 }
 
-func TestKidPath(t *testing.T) {
-	cases := []struct {
-		id   int64
-		name string
-		want string
-	}{
-		{4, "Mia", "4-mia"},
-		{12, "Ana Marija", "12-ana-marija"},
-		{3, "Đorđe", "3-đorđe"},
-		{7, "  O'Brien!! ", "7-o-brien"},
-		{5, "!!!", "5"},
+func TestBoard(t *testing.T) {
+	st := game.State{Batch: 2}
+	for i := range st.Symbols {
+		st.Symbols[i].Score = game.StartScore
 	}
-	for _, c := range cases {
-		if got := kidPath(c.id, c.name); got != c.want {
-			t.Errorf("kidPath(%d, %q) = %q, want %q", c.id, c.name, got, c.want)
+	set := func(char string, score uint32, retired bool) {
+		sym, _ := game.ParseSymbol(char)
+		st.Symbols[sym] = game.SymbolState{Score: score, Retired: retired}
+	}
+	set("A", 1420, false)
+	set("I", 995, false)
+	set("K", 1301, false)
+	set("M", 1650, true)
+	set("N", 1300, false)
+	set("E", 0, false)
+	set("B", 1450, false) // locked, so its score is not shown
+
+	levels := board(st)
+	if len(levels) != len(game.Batches) {
+		t.Fatalf("%d levels, want %d", len(levels), len(game.Batches))
+	}
+	want := levelView{Number: 1, Tiles: []tileView{
+		{"A", "142", "known"}, {"I", "99.5", "low"}, {"K", "130.1", "known"}, {"M", "165", "retired"},
+		{"N", "130", "learning"}, {"P", "100", "learning"},
+		{"0", "100", "learning"}, {"1", "100", "learning"}, {"2", "100", "learning"},
+	}}
+	if !reflect.DeepEqual(levels[0], want) {
+		t.Errorf("level 1:\n got %+v\nwant %+v", levels[0], want)
+	}
+	if l := levels[1]; l.Number != 2 || l.Locked || l.Tiles[0] != (tileView{"E", "0", "low"}) {
+		t.Errorf("level 2: %+v", l)
+	}
+	for _, l := range levels[2:] {
+		if !l.Locked {
+			t.Errorf("level %d is not locked", l.Number)
+		}
+		for _, tile := range l.Tiles {
+			if tile.Status != "locked" || tile.Score != "" {
+				t.Errorf("level %d: %+v", l.Number, tile)
+			}
+		}
+	}
+	if l := levels[2]; l.Number != 3 || l.Tiles[0].Symbol != "B" || len(l.Tiles) != len(game.Batches[2]) {
+		t.Errorf("level 3: %+v", l)
+	}
+
+	done := game.State{Batch: 4, Completed: true}
+	for _, l := range board(done) {
+		if l.Locked {
+			t.Errorf("level %d locked in free play", l.Number)
 		}
 	}
 }
 
-func TestParseKidPath(t *testing.T) {
-	for path, want := range map[string]int64{"4-mia": 4, "4": 4, "12-ana-marija": 12, "3-đorđe": 3} {
-		if got, ok := parseKidPath(path); !ok || got != want {
-			t.Errorf("parseKidPath(%q) = %d, %v; want %d", path, got, ok, want)
-		}
-	}
-	for _, bad := range []string{"", "mia", "-4", "4x", "x-4", "99999999999999999999-mia"} {
-		if _, ok := parseKidPath(bad); ok {
-			t.Errorf("parseKidPath(%q) accepted", bad)
-		}
+func TestBoardLegend(t *testing.T) {
+	want := []legendItem{{"low", "Under 100"}, {"learning", "100–130"}, {"known", "Over 130"}, {"retired", "Retired"}}
+	if !reflect.DeepEqual(boardLegend, want) {
+		t.Errorf("legend %+v, want %+v", boardLegend, want)
 	}
 }

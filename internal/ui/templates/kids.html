@@ -1,7 +1,7 @@
 {{define "title"}}Kids{{end}}
 
 {{define "content"}}
-<main class="card">
+<main class="card wide">
   <div class="topbar">
     <p class="brand">Alphabeter</p>
     <form method="post" action="/logout"><button type="submit" class="link-button">Log out</button></form>
@@ -17,19 +17,23 @@
   <ul class="kids">
     {{range .Kids}}
     <li class="kid">
-      <div class="kid-info">
-        <div class="kid-name">{{.Name}}</div>
-        <div class="kid-meta">{{.Progress}}</div>
+      <div class="kid-row">
+        <div class="kid-info">
+          <div class="kid-name">{{.Name}}</div>
+          <div class="kid-meta">{{.Progress}}</div>
+        </div>
+        <a class="play-link" href="/kids/{{.Path}}/play">Play</a>
+        <form method="post" action="/kids/{{.Path}}/delete"
+              hx-post="/kids/{{.Path}}/delete" hx-target="#kid-list" hx-swap="outerHTML"
+              hx-confirm="Delete {{.Name}} and all their progress?">
+          <button type="submit" class="link-button" aria-label="Delete {{.Name}}">Delete</button>
+        </form>
       </div>
-      <a class="play-link" href="/kids/{{.Path}}/play">Play</a>
-      <form method="post" action="/kids/{{.Path}}/delete"
-            hx-post="/kids/{{.Path}}/delete" hx-target="#kid-list" hx-swap="outerHTML"
-            hx-confirm="Delete {{.Name}} and all their progress?">
-        <button type="submit" class="link-button" aria-label="Delete {{.Name}}">Delete</button>
-      </form>
+      {{template "board" .Board}}
     </li>
     {{end}}
   </ul>
+  {{template "legend" .Legend}}
   {{else}}
   <p class="empty">Add a kid to start playing.</p>
   {{end}}

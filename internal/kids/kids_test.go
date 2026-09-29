@@ -62,9 +62,40 @@ func TestCreateInitialisesState(t *testing.T) {
 	if size != game.StateSize {
 		t.Errorf("stored state is %d bytes, want %d", size, game.StateSize)
 	}
-	got, err := f.svc.Get(ctx, f.user, kid.ID)
+	got, err := f.svc.Get(ctx, f.user, kid.Slug)
 	if err != nil || got != kid {
 		t.Errorf("Get = %+v, %v; want %+v", got, err, kid)
+	}
+}
+
+func TestCreateMakesSlugs(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	for name, want := range map[string]string{
+		"Mia": "mia", "Ana Marija": "ana-marija", "Đorđe": "đorđe", "  O'Brien!! ": "o-brien", "!!!": "kid",
+	} {
+		kid, err := f.svc.Create(ctx, f.user, name)
+		if err != nil || kid.Slug != want {
+			t.Errorf("Create(%q): slug %q, %v; want %q", name, kid.Slug, err, want)
+		}
+		if got, err := f.svc.Get(ctx, f.user, want); err != nil || got.ID != kid.ID {
+			t.Errorf("Get(%q) = %+v, %v", want, got, err)
+		}
+	}
+}
+
+func TestCreateRejectsNamesTakenByASibling(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	f.svc.Create(ctx, f.user, "Ana Marija")
+	for _, name := range []string{"Ana Marija", "ana-marija"} {
+		if _, err := f.svc.Create(ctx, f.user, name); !errors.Is(err, ErrDuplicateName) {
+			t.Errorf("Create(%q) err = %v, want ErrDuplicateName", name, err)
+		}
+	}
+	other := newUser(t, f.pool, "other@example.com")
+	if _, err := f.svc.Create(ctx, other, "Ana Marija"); err != nil {
+		t.Errorf("another parent's Ana Marija: %v", err)
 	}
 }
 
@@ -87,13 +118,13 @@ func TestListAndDelete(t *testing.T) {
 	if err != nil || len(list) != 2 || list[0].ID != a.ID || list[1].ID != b.ID {
 		t.Fatalf("List = %+v, %v", list, err)
 	}
-	if err := f.svc.Delete(ctx, f.user, a.ID); err != nil {
+	if err := f.svc.Delete(ctx, f.user, a.Slug); err != nil {
 		t.Fatal(err)
 	}
 	if list, _ = f.svc.List(ctx, f.user); len(list) != 1 || list[0].ID != b.ID {
 		t.Errorf("after delete: %+v", list)
 	}
-	if err := f.svc.Delete(ctx, f.user, a.ID); !errors.Is(err, ErrNotFound) {
+	if err := f.svc.Delete(ctx, f.user, a.Slug); !errors.Is(err, ErrNotFound) {
 		t.Errorf("second delete err = %v", err)
 	}
 }
@@ -107,16 +138,16 @@ func TestKidsAreScopedToTheirParent(t *testing.T) {
 	if list, _ := f.svc.List(ctx, other); len(list) != 0 {
 		t.Errorf("other parent sees %d kids", len(list))
 	}
-	if _, err := f.svc.Get(ctx, other, kid.ID); !errors.Is(err, ErrNotFound) {
+	if _, err := f.svc.Get(ctx, other, kid.Slug); !errors.Is(err, ErrNotFound) {
 		t.Errorf("Get err = %v", err)
 	}
-	if _, _, err := f.svc.Answer(ctx, other, kid.ID, 0, true); !errors.Is(err, ErrNotFound) {
+	if _, _, err := f.svc.Answer(ctx, other, kid.Slug, 0, true); !errors.Is(err, ErrNotFound) {
 		t.Errorf("Answer err = %v", err)
 	}
-	if _, err := f.svc.History(ctx, other, kid.ID); !errors.Is(err, ErrNotFound) {
+	if _, err := f.svc.History(ctx, other, kid.Slug); !errors.Is(err, ErrNotFound) {
 		t.Errorf("History err = %v", err)
 	}
-	if err := f.svc.Delete(ctx, other, kid.ID); !errors.Is(err, ErrNotFound) {
+	if err := f.svc.Delete(ctx, other, kid.Slug); !errors.Is(err, ErrNotFound) {
 		t.Errorf("Delete err = %v", err)
 	}
 }
@@ -127,7 +158,7 @@ func TestAnswerPersistsStateAndLog(t *testing.T) {
 	kid, _ := f.svc.Create(ctx, f.user, "Mia")
 	shown := kid.State.Current
 
-	after, outcome, err := f.svc.Answer(ctx, f.user, kid.ID, 0, true)
+	after, outcome, err := f.svc.Answer(ctx, f.user, kid.Slug, 0, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,11 +169,11 @@ func TestAnswerPersistsStateAndLog(t *testing.T) {
 	if outcome != wantOutcome {
 		t.Errorf("outcome %+v, want %+v", outcome, wantOutcome)
 	}
-	if got, _ := f.svc.Get(ctx, f.user, kid.ID); got != after {
+	if got, _ := f.svc.Get(ctx, f.user, kid.Slug); got != after {
 		t.Errorf("stored state differs from returned state")
 	}
 
-	history, err := f.svc.History(ctx, f.user, kid.ID)
+	history, err := f.svc.History(ctx, f.user, kid.Slug)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,9 +187,9 @@ func TestAnswerWithStaleSeqChangesNothing(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
 	kid, _ := f.svc.Create(ctx, f.user, "Mia")
-	first, _, _ := f.svc.Answer(ctx, f.user, kid.ID, 0, true)
+	first, _, _ := f.svc.Answer(ctx, f.user, kid.Slug, 0, true)
 
-	again, outcome, err := f.svc.Answer(ctx, f.user, kid.ID, 0, true) // double tap
+	again, outcome, err := f.svc.Answer(ctx, f.user, kid.Slug, 0, true) // double tap
 	if !errors.Is(err, ErrConflict) {
 		t.Fatalf("err = %v, want ErrConflict", err)
 	}
@@ -168,7 +199,7 @@ func TestAnswerWithStaleSeqChangesNothing(t *testing.T) {
 	if again != first {
 		t.Errorf("conflict should return the current kid")
 	}
-	if history, _ := f.svc.History(ctx, f.user, kid.ID); len(history) != 1 {
+	if history, _ := f.svc.History(ctx, f.user, kid.Slug); len(history) != 1 {
 		t.Errorf("history has %d answers, want 1", len(history))
 	}
 }
@@ -185,7 +216,7 @@ func TestConcurrentDoubleTapCountsOnce(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, _, errs[i] = f.svc.Answer(ctx, f.user, kid.ID, 0, true)
+			_, _, errs[i] = f.svc.Answer(ctx, f.user, kid.Slug, 0, true)
 		}()
 	}
 	wg.Wait()
@@ -217,7 +248,7 @@ func TestLogChunksByUTCDayWithSecondDeltas(t *testing.T) {
 	}
 	for i, at := range times {
 		f.clock = at
-		if _, _, err := f.svc.Answer(ctx, f.user, kid.ID, uint32(i), i%2 == 0); err != nil {
+		if _, _, err := f.svc.Answer(ctx, f.user, kid.Slug, uint32(i), i%2 == 0); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -243,7 +274,7 @@ func TestLogChunksByUTCDayWithSecondDeltas(t *testing.T) {
 		t.Errorf("chunks = %+v, want %+v", chunks, want)
 	}
 
-	history, _ := f.svc.History(ctx, f.user, kid.ID)
+	history, _ := f.svc.History(ctx, f.user, kid.Slug)
 	for i, h := range history {
 		if wantAt := times[i].Truncate(time.Second); !h.At.Equal(wantAt) || h.Seq != uint32(i+1) {
 			t.Errorf("answer %d: seq=%d at=%s, want seq=%d at=%s", i, h.Seq, h.At, i+1, wantAt)
@@ -258,12 +289,12 @@ func TestHistoryReplaysToStoredState(t *testing.T) {
 	rng := rand.New(rand.NewPCG(9, 9))
 	for i := range 400 {
 		f.clock = f.clock.Add(time.Duration(rng.IntN(3*3600)) * time.Second)
-		if _, _, err := f.svc.Answer(ctx, f.user, kid.ID, uint32(i), rng.IntN(4) != 0); err != nil {
+		if _, _, err := f.svc.Answer(ctx, f.user, kid.Slug, uint32(i), rng.IntN(4) != 0); err != nil {
 			t.Fatal(err)
 		}
 	}
-	stored, _ := f.svc.Get(ctx, f.user, kid.ID)
-	history, err := f.svc.History(ctx, f.user, kid.ID)
+	stored, _ := f.svc.Get(ctx, f.user, kid.Slug)
+	history, err := f.svc.History(ctx, f.user, kid.Slug)
 	if err != nil {
 		t.Fatal(err)
 	}

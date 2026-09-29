@@ -8,6 +8,11 @@
   --danger-bg: #fdecea;
   --yes: #1a7f37;
   --no: #c62828;
+  /* Progress board: under 100, 100–130, over 130, retired. */
+  --low: #c62828;
+  --learning: #e6e6e6;
+  --known: #1a7f37;
+  --retired: #0b4a20;
   --radius: .65rem;
   color-scheme: light;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -26,6 +31,7 @@ h1 { font-size: 1.4rem; margin: 0 0 1.25rem; }
 }
 
 .card { max-width: 26rem; margin: 0 auto; padding: 2.5rem 1rem 3rem; }
+.card.wide { max-width: 36rem; }
 .brand {
   font-family: Arial, Helvetica, sans-serif;
   font-weight: 700;
@@ -79,13 +85,13 @@ button:disabled { opacity: .5; cursor: default; }
 .link-button { background: none; border: none; padding: .25rem; color: var(--muted); text-decoration: underline; }
 .kids { list-style: none; margin: 0 0 1.5rem; padding: 0; display: grid; gap: .75rem; }
 .kid {
-  display: flex;
-  align-items: center;
+  display: grid;
   gap: .75rem;
   padding: .75rem .9rem;
   border: 1px solid var(--line);
   border-radius: var(--radius);
 }
+.kid-row { display: flex; align-items: center; gap: .75rem; }
 .kid-info { flex: 1; min-width: 0; }
 .kid-name { font-weight: 600; overflow-wrap: anywhere; }
 .kid-meta { color: var(--muted); font-size: .85rem; }
@@ -145,25 +151,34 @@ body.play { height: 100vh; height: 100dvh; overflow: hidden; background: #fff; }
   font-size: 1rem;
 }
 
-/* Score of the symbol on screen, for the parent. */
-.score {
+/* Top right, for the parent: the score of the symbol on screen, and below it
+   the answer just given. Stacked, so a wrapped note never hides under the flash. */
+.corner {
   position: fixed;
   top: .6rem;
   right: .9rem;
   max-width: 62vw;
-  text-align: right;
-  line-height: 1.3;
+  display: grid;
+  justify-items: end;
+  gap: .6rem;
   pointer-events: none;
 }
+.score {
+  pointer-events: auto;
+  padding: 0;
+  border: none;
+  background: none;
+  text-align: right;
+  line-height: 1.3;
+  -webkit-tap-highlight-color: transparent;
+}
+.score-value, .score-note, .score-hint { display: block; }
 .score-value { font-weight: 700; font-size: 1rem; color: var(--ink); }
 .score-note { font-size: .8rem; color: var(--muted); }
+.score-hint { margin-top: 1rem; font-size: .72rem; color: var(--muted); } /* a blank line under the note */
 
 /* The answer just given: the letter's new score, shown for 2 seconds. */
 .flash {
-  position: fixed;
-  top: 3.9rem;
-  right: .9rem;
-  max-width: 62vw;
   padding: .3rem .7rem;
   border: 2px solid currentColor;
   border-radius: var(--radius);
@@ -184,3 +199,67 @@ body.play { height: 100vh; height: 100dvh; overflow: hidden; background: #fff; }
 @keyframes flash-hide {
   to { visibility: hidden; }
 }
+
+/* Progress board: every symbol by level, colored by score. */
+.board { display: grid; gap: .5rem; }
+.level-name { font-size: .75rem; color: var(--muted); margin-bottom: .2rem; }
+.tiles { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: .3rem; }
+.tile {
+  width: 2.9rem;
+  padding: .25rem 0 .2rem;
+  border-radius: .4rem;
+  background: var(--learning);
+  color: var(--ink);
+  text-align: center;
+  line-height: 1.15;
+}
+.tile-symbol { display: block; font-family: Arial, Helvetica, sans-serif; font-weight: 700; font-size: 1.15rem; }
+.tile-score { display: block; font-size: .68rem; font-variant-numeric: tabular-nums; }
+.tile.low { background: var(--low); color: #fff; }
+.tile.known { background: var(--known); color: #fff; }
+.tile.retired { background: var(--retired); color: #fff; }
+.tile.retired .tile-score::after { content: " ✓"; }
+.tile.locked { background: none; color: #b5b5b5; box-shadow: inset 0 0 0 1px var(--line); }
+.level.locked .level-name { color: #b5b5b5; }
+
+.legend {
+  list-style: none;
+  margin: 0 0 1.5rem;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: .35rem 1rem;
+  font-size: .8rem;
+  color: var(--muted);
+}
+.swatch {
+  display: inline-block;
+  width: .8rem;
+  height: .8rem;
+  margin-right: .35rem;
+  border-radius: .2rem;
+  vertical-align: -.1rem;
+  background: var(--learning);
+}
+.swatch.low { background: var(--low); }
+.swatch.known { background: var(--known); }
+.swatch.retired { background: var(--retired); }
+
+/* On the play screen the board covers everything until D, Esc or Close. */
+.board-panel {
+  display: none;
+  position: fixed;
+  inset: 0;
+  overflow-y: auto;
+  padding: 1rem 1rem max(1rem, env(safe-area-inset-bottom));
+  background: #fff;
+}
+.board-open .board-panel { display: block; }
+.board-panel > * { max-width: 44rem; margin-left: auto; margin-right: auto; }
+.board-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: .75rem; }
+.board-head h2 { margin: 0; font-size: 1.3rem; overflow-wrap: anywhere; }
+.board-panel .board { gap: .9rem; margin-bottom: 1rem; }
+.board-panel .tiles { gap: .4rem; }
+.board-panel .tile { width: 4rem; padding: .35rem 0 .3rem; }
+.board-panel .tile-symbol { font-size: 1.8rem; }
+.board-panel .tile-score { font-size: .85rem; }

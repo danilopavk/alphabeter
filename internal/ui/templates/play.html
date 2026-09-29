@@ -2,6 +2,8 @@
 
 {{define "bodyclass"}}play{{end}}
 
+{{define "scripts"}}<script src="{{asset "play.js"}}" defer></script>{{end}}
+
 {{define "content"}}
 <a class="back" href="/kids">← Kids</a>
 {{template "stage" .}}
@@ -9,18 +11,21 @@
 
 {{define "stage"}}
 <main id="stage">
-  <div class="score">
-    <div class="score-value">{{.Symbol}} score: {{.Score}}</div>
-    <div class="score-note">{{.Note}}</div>
+  <div class="corner">
+    <button type="button" class="score" data-board-toggle aria-controls="board">
+      <span class="score-value">{{.Symbol}} score: {{.Score}}</span>
+      <span class="score-note">{{.Note}}</span>
+      <span class="score-hint">Click on a score or press d to open the scorecard</span>
+    </button>
+    {{with .Flash}}
+    <div class="flash {{if .Correct}}right{{else}}wrong{{end}}" role="status">
+      <span class="flash-symbol">{{.Symbol}}</span> {{if .Correct}}✓{{else}}✗{{end}}
+      <span class="flash-score">{{.To}}</span>
+      <span class="flash-delta">{{.Delta}}</span>
+      {{with .Message}}<div class="flash-message">{{.}}</div>{{end}}
+    </div>
+    {{end}}
   </div>
-  {{with .Flash}}
-  <div class="flash {{if .Correct}}right{{else}}wrong{{end}}" role="status">
-    <span class="flash-symbol">{{.Symbol}}</span> {{if .Correct}}✓{{else}}✗{{end}}
-    <span class="flash-score">{{.To}}</span>
-    <span class="flash-delta">{{.Delta}}</span>
-    {{with .Message}}<div class="flash-message">{{.}}</div>{{end}}
-  </div>
-  {{end}}
   <div class="symbol" aria-live="polite">{{.Symbol}}</div>
   <form class="answers" method="post" action="/kids/{{.Path}}/answer"
         hx-post="/kids/{{.Path}}/answer" hx-target="#stage" hx-swap="outerHTML"
@@ -29,5 +34,13 @@
     <button type="submit" name="correct" value="1" class="yes">Yes</button>
     <button type="submit" name="correct" value="0" class="no">No</button>
   </form>
+  <section id="board" class="board-panel" aria-label="Scorecard">
+    <div class="board-head">
+      <h2>{{.Name}}</h2>
+      <button type="button" class="link-button" data-board-toggle>Close</button>
+    </div>
+    {{template "board" .Board}}
+    {{template "legend" .Legend}}
+  </section>
 </main>
 {{end}}

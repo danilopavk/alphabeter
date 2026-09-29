@@ -23,6 +23,7 @@ import (
 	"github.com/danilopavk/alphabeter/internal/email"
 	"github.com/danilopavk/alphabeter/internal/game"
 	"github.com/danilopavk/alphabeter/internal/testutil"
+	"github.com/danilopavk/alphabeter/internal/ui"
 )
 
 type env struct {
@@ -186,8 +187,9 @@ func (b *browser) logIn(address, password string) response {
 	return kids
 }
 
-var kidIDPattern = regexp.MustCompile(`/kids/(\d+)(?:-[^/"]*)?/play`)
+var kidSlugPattern = regexp.MustCompile(`/kids/([^/"]+)/play`)
 
+// addKid adds a kid and returns their URL segment.
 func (b *browser) addKid(name string) string {
 	t := b.env.t
 	t.Helper()
@@ -195,8 +197,8 @@ func (b *browser) addKid(name string) string {
 	if res.StatusCode != http.StatusOK || !strings.Contains(res.body, name) {
 		t.Fatalf("add kid: %d %s", res.StatusCode, res.body)
 	}
-	ids := kidIDPattern.FindAllStringSubmatch(res.body, -1)
-	return ids[len(ids)-1][1]
+	slugs := kidSlugPattern.FindAllStringSubmatch(res.body, -1)
+	return slugs[len(slugs)-1][1]
 }
 
 func TestLoginRedirectStartsPKCEFlow(t *testing.T) {
@@ -374,13 +376,13 @@ func TestPlay(t *testing.T) {
 	e := start(t)
 	b := e.browser()
 	b.signUp("parent@example.com")
-	id := b.addKid("Mia")
+	slug := b.addKid("Mia")
 
-	page := b.get("/kids/" + id + "/play")
+	page := b.get("/kids/" + slug + "/play")
 	if page.StatusCode != http.StatusOK || !strings.Contains(page.body, `name="seq" value="0"`) {
 		t.Fatalf("play page: %d %s", page.StatusCode, page.body)
 	}
-	symbol := regexp.MustCompile(`<div class="symbol"[^>]*>(.)</div>`).FindStringSubmatch(page.body)
+	symbol := symbolPattern.FindStringSubmatch(page.body)
 	if symbol == nil {
 		t.Fatal("no symbol on the play page")
 	}
@@ -388,8 +390,8 @@ func TestPlay(t *testing.T) {
 		t.Errorf("first symbol %q is not from batch 1", symbol[1])
 	}
 	for _, want := range []string{
-		`<div class="score-value">` + symbol[1] + ` score: 100</div>`,
-		`<div class="score-note">Over 130 needed for the next level</div>`,
+		`<span class="score-value">` + symbol[1] + ` score: 100</span>`,
+		`<span class="score-note">Over 130 needed for the next level</span>`,
 	} {
 		if !strings.Contains(page.body, want) {
 			t.Errorf("play page lacks %s", want)
@@ -400,7 +402,7 @@ func TestPlay(t *testing.T) {
 	}
 
 	answer := func(seq string) response {
-		return b.post("/kids/"+id+"/answer", url.Values{"seq": {seq}, "correct": {"1"}}, "HX-Request", "true")
+		return b.post("/kids/"+slug+"/answer", url.Values{"seq": {seq}, "correct": {"1"}}, "HX-Request", "true")
 	}
 	res := answer("0")
 	if res.StatusCode != http.StatusOK || !strings.HasPrefix(strings.TrimSpace(res.body), `<main id="stage"`) ||
@@ -419,38 +421,102 @@ func TestPlay(t *testing.T) {
 		t.Error("a rejected double tap shows a score flash")
 	}
 	var seq int
-	e.pool.QueryRow(context.Background(), `SELECT seq FROM kids WHERE id = $1`, id).Scan(&seq)
+	e.pool.QueryRow(context.Background(), `SELECT seq FROM kids WHERE slug = $1`, slug).Scan(&seq)
 	if seq != 1 {
 		t.Errorf("seq in DB = %d, want 1", seq)
 	}
 
 	// Without htmx the form still works.
-	res = b.post("/kids/"+id+"/answer", url.Values{"seq": {"1"}, "correct": {"0"}})
-	if res.Request.URL.Path != "/kids/"+id+"-mia/play" || !strings.Contains(res.body, `name="seq" value="2"`) {
+	res = b.post("/kids/"+slug+"/answer", url.Values{"seq": {"1"}, "correct": {"0"}})
+	if res.Request.URL.Path != "/kids/mia/play" || !strings.Contains(res.body, `name="seq" value="2"`) {
 		t.Errorf("plain form post ended at %s", res.Request.URL)
 	}
 }
 
-func TestKidURLsContainTheName(t *testing.T) {
+// tileHTML is how the progress board shows one symbol.
+func tileHTML(status, symbol, score string) string {
+	html := `<li class="tile ` + status + `"><span class="tile-symbol">` + symbol + `</span>`
+	if score != "" {
+		html += `<span class="tile-score">` + score + `</span>`
+	}
+	return html + `</li>`
+}
+
+var symbolPattern = regexp.MustCompile(`<div class="symbol"[^>]*>(.)</div>`)
+
+func TestDashboard(t *testing.T) {
 	e := start(t)
 	b := e.browser()
 	b.signUp("parent@example.com")
-	id := b.addKid("Ana Marija")
-	canonical := "/kids/" + id + "-ana-marija/play"
+	slug := b.addKid("Mia")
 
-	if list := b.get("/kids"); !strings.Contains(list.body, `href="`+canonical+`"`) {
-		t.Errorf("kids list does not link to %s", canonical)
-	}
-	for _, old := range []string{"/kids/" + id + "/play", "/kids/" + id + "-someone-else/play"} {
-		res := b.do(b.single, "GET", old, nil)
-		if res.StatusCode != http.StatusFound || res.Header.Get("Location") != canonical {
-			t.Errorf("GET %s: %d → %q, want redirect to %s", old, res.StatusCode, res.Header.Get("Location"), canonical)
+	list := b.get("/kids")
+	for _, want := range []string{
+		tileHTML("learning", "A", "100"),
+		tileHTML("learning", "2", "100"),
+		tileHTML("locked", "B", ""),
+		`<span class="swatch known"></span>Over 130`,
+	} {
+		if !strings.Contains(list.body, want) {
+			t.Errorf("kids page lacks %s", want)
 		}
 	}
-	page := b.get(canonical)
-	if page.StatusCode != http.StatusOK || page.Request.URL.Path != canonical ||
-		!strings.Contains(page.body, `hx-post="/kids/`+id+`-ana-marija/answer"`) {
-		t.Errorf("play page at %s: %d", page.Request.URL.Path, page.StatusCode)
+
+	page := b.get("/kids/" + slug + "/play")
+	for _, want := range []string{
+		`<script src="` + ui.Asset("play.js") + `" defer></script>`,
+		`<button type="button" class="score" data-board-toggle`,
+		`<span class="score-hint">Click on a score or press d to open the scorecard</span>`,
+		`<section id="board" class="board-panel"`,
+		tileHTML("locked", "Z", ""),
+	} {
+		if !strings.Contains(page.body, want) {
+			t.Errorf("play page lacks %s", want)
+		}
+	}
+
+	// The board is part of the swapped stage, so it stays current while open.
+	first := symbolPattern.FindStringSubmatch(page.body)[1]
+	res := b.post("/kids/"+slug+"/answer", url.Values{"seq": {"0"}, "correct": {"1"}}, "HX-Request", "true")
+	if want := tileHTML("learning", first, "100.5"); !strings.Contains(res.body, want) {
+		t.Errorf("answer fragment lacks %s", want)
+	}
+	second := symbolPattern.FindStringSubmatch(res.body)[1]
+	b.post("/kids/"+slug+"/answer", url.Values{"seq": {"1"}, "correct": {"0"}}, "HX-Request", "true")
+	if want := tileHTML("low", second, "99.5"); !strings.Contains(b.get("/kids").body, want) {
+		t.Errorf("kids page lacks %s after a wrong answer", want)
+	}
+}
+
+func TestKidURLsUseTheNameNotTheID(t *testing.T) {
+	e := start(t)
+	b := e.browser()
+	b.signUp("parent@example.com")
+	if slug := b.addKid("Ana Marija"); slug != "ana-marija" {
+		t.Fatalf("Ana Marija's URL segment is %q", slug)
+	}
+	page := b.get("/kids/ana-marija/play")
+	if page.StatusCode != http.StatusOK || !strings.Contains(page.body, `hx-post="/kids/ana-marija/answer"`) {
+		t.Errorf("play page: %d", page.StatusCode)
+	}
+	var id string
+	e.pool.QueryRow(context.Background(), `SELECT id::text FROM kids WHERE slug = 'ana-marija'`).Scan(&id)
+	for _, old := range []string{"/kids/" + id + "/play", "/kids/" + id + "-ana-marija/play"} {
+		if res := b.get(old); res.StatusCode != http.StatusNotFound {
+			t.Errorf("GET %s: %d, want 404", old, res.StatusCode)
+		}
+	}
+
+	res := b.post("/kids", url.Values{"name": {"Ana-Marija"}}, "HX-Request", "true")
+	if !strings.Contains(res.body, "You already have a kid with that name.") {
+		t.Errorf("second Ana-Marija: %d %s", res.StatusCode, res.body)
+	}
+
+	// Letters outside ASCII survive the round trip through the link.
+	b.addKid("Đorđe")
+	link := regexp.MustCompile(`href="(/kids/[^/"]+/play)"`).FindAllStringSubmatch(b.get("/kids").body, -1)
+	if res := b.get(link[len(link)-1][1]); res.StatusCode != http.StatusOK || !strings.Contains(res.body, "<title>Đorđe") {
+		t.Errorf("GET %s: %d", link[len(link)-1][1], res.StatusCode)
 	}
 }
 
@@ -458,17 +524,17 @@ func TestKidsBelongToTheirParent(t *testing.T) {
 	e := start(t)
 	owner := e.browser()
 	owner.signUp("parent@example.com")
-	id := owner.addKid("Mia")
+	slug := owner.addKid("Mia")
 
 	other := e.browser()
 	other.signUp("other@example.com")
-	if res := other.get("/kids/" + id + "/play"); res.StatusCode != http.StatusNotFound {
+	if res := other.get("/kids/" + slug + "/play"); res.StatusCode != http.StatusNotFound {
 		t.Errorf("play: %d", res.StatusCode)
 	}
-	if res := other.post("/kids/"+id+"/answer", url.Values{"seq": {"0"}, "correct": {"1"}}); res.StatusCode != http.StatusNotFound {
+	if res := other.post("/kids/"+slug+"/answer", url.Values{"seq": {"0"}, "correct": {"1"}}); res.StatusCode != http.StatusNotFound {
 		t.Errorf("answer: %d", res.StatusCode)
 	}
-	if res := other.post("/kids/"+id+"/delete", nil, "HX-Request", "true"); res.StatusCode != http.StatusNotFound {
+	if res := other.post("/kids/"+slug+"/delete", nil, "HX-Request", "true"); res.StatusCode != http.StatusNotFound {
 		t.Errorf("delete: %d", res.StatusCode)
 	}
 	if res := other.get("/kids"); strings.Contains(res.body, "Mia") {
@@ -485,8 +551,8 @@ func TestAddKidValidationAndDelete(t *testing.T) {
 	if res.StatusCode != http.StatusOK || !strings.Contains(res.body, "1 to 40 characters") {
 		t.Errorf("empty name: %d %s", res.StatusCode, res.body)
 	}
-	id := b.addKid("Mia")
-	res = b.post("/kids/"+id+"/delete", nil, "HX-Request", "true")
+	slug := b.addKid("Mia")
+	res = b.post("/kids/"+slug+"/delete", nil, "HX-Request", "true")
 	if res.StatusCode != http.StatusOK || strings.Contains(res.body, "Mia") {
 		t.Errorf("after delete: %d %s", res.StatusCode, res.body)
 	}

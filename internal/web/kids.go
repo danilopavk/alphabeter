@@ -6,33 +6,61 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
-	"unicode"
 
 	"github.com/danilopavk/alphabeter/internal/game"
 	"github.com/danilopavk/alphabeter/internal/kids"
 )
 
 type kidView struct {
-	Path     string // URL segment, e.g. "4-mia"
+	Path     string // URL segment, e.g. "mia"
 	Name     string
 	Progress string
+	Board    []levelView
 }
 
 type kidsPage struct {
-	Kids  []kidView
-	Name  string // re-filled into the add form after a validation error
-	Error string
+	Kids   []kidView
+	Legend []legendItem
+	Name   string // re-filled into the add form after a validation error
+	Error  string
 }
 
 type playView struct {
-	Path   string // URL segment, e.g. "4-mia"
+	Path   string // URL segment, e.g. "mia"
 	Name   string
 	Symbol string
 	Seq    uint32
 	Score  string     // of the symbol on screen
 	Note   string     // what that score means, e.g. "Over 130 needed for the next level"
 	Flash  *flashView // the answer just given, animated; nil on a plain page load
+	Board  []levelView
+	Legend []legendItem
+}
+
+// levelView is one level (batch) of the progress board.
+type levelView struct {
+	Number int
+	Locked bool
+	Tiles  []tileView
+}
+
+// tileView is one symbol on the progress board.
+type tileView struct {
+	Symbol string
+	Score  string // empty while locked
+	Status string // locked, low, learning, known or retired; also its CSS class
+}
+
+type legendItem struct {
+	Status string
+	Label  string
+}
+
+var boardLegend = []legendItem{
+	{"low", "Under " + formatScore(game.StartScore)},
+	{"learning", formatScore(game.StartScore) + "–" + formatScore(game.UnlockScore)},
+	{"known", "Over " + formatScore(game.UnlockScore)},
+	{"retired", "Retired"},
 }
 
 // flashView shows the answered symbol's new score for a moment.
@@ -55,8 +83,11 @@ func (s *Server) renderKids(w http.ResponseWriter, r *http.Request, userID int64
 		return
 	}
 	for _, k := range list {
-		page.Kids = append(page.Kids, kidView{Path: kidPath(k.ID, k.Name), Name: k.Name, Progress: progress(k.State)})
+		page.Kids = append(page.Kids, kidView{
+			Path: k.Slug, Name: k.Name, Progress: progress(k.State), Board: board(k.State),
+		})
 	}
+	page.Legend = boardLegend
 	if isHtmx(r) {
 		// htmx only swaps 2xx responses, so validation errors come back as 200.
 		s.ui.Fragment(w, http.StatusOK, "kids", "kid-list", page)
@@ -76,12 +107,46 @@ func progress(st game.State) string {
 	return fmt.Sprintf("Level %d of %d · %d %s", st.Batch, len(game.Batches), st.Seq, answers)
 }
 
+// board is the progress dashboard: every symbol by level, colored by score.
+func board(st game.State) []levelView {
+	levels := make([]levelView, len(game.Batches))
+	for i, batch := range game.Batches {
+		levels[i] = levelView{Number: i + 1, Locked: i >= int(st.Batch)}
+		for _, sym := range batch {
+			tile := tileView{Symbol: sym.String(), Status: tileStatus(st, sym)}
+			if tile.Status != "locked" {
+				tile.Score = formatScore(st.Symbols[sym].Score)
+			}
+			levels[i].Tiles = append(levels[i].Tiles, tile)
+		}
+	}
+	return levels
+}
+
+func tileStatus(st game.State, sym game.Symbol) string {
+	s := st.Symbols[sym]
+	switch {
+	case !st.IsUnlocked(sym):
+		return "locked"
+	case s.Retired:
+		return "retired"
+	case s.Score > game.UnlockScore:
+		return "known"
+	case s.Score < game.StartScore:
+		return "low"
+	default:
+		return "learning"
+	}
+}
+
 func (s *Server) addKid(w http.ResponseWriter, r *http.Request, userID int64) {
 	name := r.PostFormValue("name")
 	_, err := s.kids.Create(r.Context(), userID, name)
 	switch {
 	case errors.Is(err, kids.ErrInvalidName):
 		s.renderKids(w, r, userID, http.StatusBadRequest, kidsPage{Name: name, Error: "Name must be 1 to 40 characters."})
+	case errors.Is(err, kids.ErrDuplicateName):
+		s.renderKids(w, r, userID, http.StatusBadRequest, kidsPage{Name: name, Error: "You already have a kid with that name."})
 	case err != nil:
 		s.serverError(w, err)
 	case isHtmx(r):
@@ -92,12 +157,7 @@ func (s *Server) addKid(w http.ResponseWriter, r *http.Request, userID int64) {
 }
 
 func (s *Server) deleteKid(w http.ResponseWriter, r *http.Request, userID int64) {
-	id, ok := kidID(r)
-	if !ok {
-		s.notFound(w)
-		return
-	}
-	err := s.kids.Delete(r.Context(), userID, id)
+	err := s.kids.Delete(r.Context(), userID, r.PathValue("kid"))
 	switch {
 	case errors.Is(err, kids.ErrNotFound):
 		s.notFound(w)
@@ -111,19 +171,12 @@ func (s *Server) deleteKid(w http.ResponseWriter, r *http.Request, userID int64)
 }
 
 func (s *Server) play(w http.ResponseWriter, r *http.Request, userID int64) {
-	id, ok := kidID(r)
-	if !ok {
-		s.notFound(w)
-		return
-	}
-	kid, err := s.kids.Get(r.Context(), userID, id)
+	kid, err := s.kids.Get(r.Context(), userID, r.PathValue("kid"))
 	switch {
 	case errors.Is(err, kids.ErrNotFound):
 		s.notFound(w)
 	case err != nil:
 		s.serverError(w, err)
-	case r.PathValue("kid") != kidPath(kid.ID, kid.Name):
-		http.Redirect(w, r, playURL(kid), http.StatusFound) // old or mistyped name
 	default:
 		s.ui.Page(w, http.StatusOK, "play", viewOf(kid, nil))
 	}
@@ -132,18 +185,13 @@ func (s *Server) play(w http.ResponseWriter, r *http.Request, userID int64) {
 // answer applies Yes/No to the symbol the parent saw at seq. A stale seq (double
 // tap, second tab) changes nothing and just shows the current symbol.
 func (s *Server) answer(w http.ResponseWriter, r *http.Request, userID int64) {
-	id, ok := kidID(r)
-	if !ok {
-		s.notFound(w)
-		return
-	}
 	seq, err := strconv.ParseUint(r.PostFormValue("seq"), 10, 32)
 	correct := r.PostFormValue("correct")
 	if err != nil || (correct != "1" && correct != "0") {
 		http.Error(w, "bad answer", http.StatusBadRequest)
 		return
 	}
-	kid, outcome, err := s.kids.Answer(r.Context(), userID, id, uint32(seq), correct == "1")
+	kid, outcome, err := s.kids.Answer(r.Context(), userID, r.PathValue("kid"), uint32(seq), correct == "1")
 	var flash *flashView
 	if err == nil {
 		flash = flashOf(outcome, kid.State)
@@ -163,13 +211,15 @@ func (s *Server) answer(w http.ResponseWriter, r *http.Request, userID int64) {
 func viewOf(k kids.Kid, flash *flashView) playView {
 	st := k.State
 	return playView{
-		Path:   kidPath(k.ID, k.Name),
+		Path:   k.Slug,
 		Name:   k.Name,
 		Symbol: st.Current.String(),
 		Seq:    st.Seq,
 		Score:  formatScore(st.Symbols[st.Current].Score),
 		Note:   scoreNote(st),
 		Flash:  flash,
+		Board:  board(st),
+		Legend: boardLegend,
 	}
 }
 
@@ -233,45 +283,8 @@ func flashOf(o game.Outcome, st game.State) *flashView {
 	return f
 }
 
-// kidPath is a kid's URL segment: the ID, then the name for people to read,
-// e.g. "4-mia". Only the ID is used to find the kid.
-func kidPath(id int64, name string) string {
-	var slug strings.Builder
-	gap := false
-	for _, r := range strings.ToLower(name) {
-		if !unicode.IsLetter(r) && !unicode.IsDigit(r) {
-			gap = true
-			continue
-		}
-		if gap && slug.Len() > 0 {
-			slug.WriteByte('-')
-		}
-		slug.WriteRune(r)
-		gap = false
-	}
-	path := strconv.FormatInt(id, 10)
-	if slug.Len() > 0 {
-		path += "-" + slug.String()
-	}
-	return path
-}
-
-// parseKidPath reads the ID from a kid's URL segment.
-func parseKidPath(path string) (int64, bool) {
-	digits, _, _ := strings.Cut(path, "-")
-	if digits == "" || strings.TrimLeft(digits, "0123456789") != "" {
-		return 0, false
-	}
-	id, err := strconv.ParseInt(digits, 10, 64)
-	return id, err == nil
-}
-
 func playURL(k kids.Kid) string {
-	return (&url.URL{Path: "/kids/" + kidPath(k.ID, k.Name) + "/play"}).String()
-}
-
-func kidID(r *http.Request) (int64, bool) {
-	return parseKidPath(r.PathValue("kid"))
+	return (&url.URL{Path: "/kids/" + k.Slug + "/play"}).String()
 }
 
 func (s *Server) notFound(w http.ResponseWriter) {

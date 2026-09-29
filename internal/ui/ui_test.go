@@ -9,7 +9,7 @@ import (
 )
 
 func TestAssetURLsCarryAContentVersion(t *testing.T) {
-	for _, name := range []string{"app.css", "htmx.min.js", "favicon.svg"} {
+	for _, name := range []string{"app.css", "htmx.min.js", "play.js", "favicon.svg"} {
 		url := Asset(name)
 		if !regexp.MustCompile(`^/static/` + regexp.QuoteMeta(name) + `\?v=[0-9a-f]{8}$`).MatchString(url) {
 			t.Errorf("Asset(%q) = %q", name, url)

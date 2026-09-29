@@ -8,9 +8,11 @@ import (
 	"math/rand/v2"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/danilopavk/alphabeter/internal/game"
@@ -20,6 +22,8 @@ var (
 	ErrNotFound    = errors.New("kids: not found")
 	ErrConflict    = errors.New("kids: answer is for an outdated symbol")
 	ErrInvalidName = errors.New("kids: name must be 1 to 40 characters")
+	// ErrDuplicateName: the parent has a kid whose name gives the same slug.
+	ErrDuplicateName = errors.New("kids: the parent already has a kid with that name")
 )
 
 const maxNameLen = 40
@@ -27,6 +31,7 @@ const maxNameLen = 40
 type Kid struct {
 	ID    int64
 	Name  string
+	Slug  string // the kid's URL segment, unique per parent, e.g. "ana-marija"
 	State game.State
 }
 
@@ -58,17 +63,44 @@ func (s *Service) Create(ctx context.Context, userID int64, name string) (Kid, e
 	if name == "" || utf8.RuneCountInString(name) > maxNameLen {
 		return Kid{}, ErrInvalidName
 	}
-	kid := Kid{Name: name, State: game.NewState(s.rng)}
+	kid := Kid{Name: name, Slug: slugOf(name), State: game.NewState(s.rng)}
 	err := s.pool.QueryRow(ctx,
-		`INSERT INTO kids (user_id, name, seq, state) VALUES ($1, $2, 0, $3) RETURNING id`,
-		userID, name, game.EncodeState(kid.State),
+		`INSERT INTO kids (user_id, name, slug, seq, state) VALUES ($1, $2, $3, 0, $4) RETURNING id`,
+		userID, name, kid.Slug, game.EncodeState(kid.State),
 	).Scan(&kid.ID)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" { // unique_violation
+		return Kid{}, ErrDuplicateName
+	}
 	return kid, err
+}
+
+// slugOf makes a URL segment from a name: lowercase letters and digits, with a
+// dash for each run of anything else, e.g. "Ana Marija" → "ana-marija".
+// migrations/003_kid_slugs.sql does the same for kids added before.
+func slugOf(name string) string {
+	var slug strings.Builder
+	gap := false
+	for _, r := range strings.ToLower(name) {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+			gap = true
+			continue
+		}
+		if gap && slug.Len() > 0 {
+			slug.WriteByte('-')
+		}
+		slug.WriteRune(r)
+		gap = false
+	}
+	if slug.Len() == 0 {
+		return "kid"
+	}
+	return slug.String()
 }
 
 func (s *Service) List(ctx context.Context, userID int64) ([]Kid, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT id, name, seq, state FROM kids WHERE user_id = $1 ORDER BY id`, userID)
+		`SELECT id, name, slug, seq, state FROM kids WHERE user_id = $1 ORDER BY id`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +112,7 @@ func (s *Service) List(ctx context.Context, userID int64) ([]Kid, error) {
 			seq  int32
 			blob []byte
 		)
-		if err := rows.Scan(&kid.ID, &kid.Name, &seq, &blob); err != nil {
+		if err := rows.Scan(&kid.ID, &kid.Name, &kid.Slug, &seq, &blob); err != nil {
 			return nil, err
 		}
 		if kid.State, err = game.DecodeState(uint32(seq), blob); err != nil {
@@ -91,13 +123,13 @@ func (s *Service) List(ctx context.Context, userID int64) ([]Kid, error) {
 	return kids, rows.Err()
 }
 
-func (s *Service) Get(ctx context.Context, userID, kidID int64) (Kid, error) {
-	kid, _, err := s.load(ctx, s.pool, userID, kidID, "")
+func (s *Service) Get(ctx context.Context, userID int64, slug string) (Kid, error) {
+	kid, _, err := s.load(ctx, s.pool, userID, slug, "")
 	return kid, err
 }
 
-func (s *Service) Delete(ctx context.Context, userID, kidID int64) error {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM kids WHERE id = $1 AND user_id = $2`, kidID, userID)
+func (s *Service) Delete(ctx context.Context, userID int64, slug string) error {
+	tag, err := s.pool.Exec(ctx, `DELETE FROM kids WHERE user_id = $1 AND slug = $2`, userID, slug)
 	if err != nil {
 		return err
 	}
@@ -111,14 +143,14 @@ func (s *Service) Delete(ctx context.Context, userID, kidID int64) error {
 // parent saw seq expectedSeq, and reports what the answer did. If the kid has
 // moved on since (double tap, stale tab), nothing is written and the current
 // kid is returned with ErrConflict.
-func (s *Service) Answer(ctx context.Context, userID, kidID int64, expectedSeq uint32, correct bool) (Kid, game.Outcome, error) {
+func (s *Service) Answer(ctx context.Context, userID int64, slug string, expectedSeq uint32, correct bool) (Kid, game.Outcome, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return Kid{}, game.Outcome{}, err
 	}
 	defer tx.Rollback(ctx)
 
-	kid, lastAt, err := s.load(ctx, tx, userID, kidID, "FOR UPDATE")
+	kid, lastAt, err := s.load(ctx, tx, userID, slug, "FOR UPDATE")
 	if err != nil {
 		return Kid{}, game.Outcome{}, err
 	}
@@ -137,14 +169,14 @@ func (s *Service) Answer(ctx context.Context, userID, kidID int64, expectedSeq u
 
 	if _, err := tx.Exec(ctx,
 		`UPDATE kids SET seq = $1, last_answer_at = $2, state = $3 WHERE id = $4`,
-		int32(kid.State.Seq), now, game.EncodeState(kid.State), kidID,
+		int32(kid.State.Seq), now, game.EncodeState(kid.State), kid.ID,
 	); err != nil {
 		return Kid{}, game.Outcome{}, err
 	}
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO answer_log (kid_id, day, first_seq, started_at, events) VALUES ($1, $2, $3, $4, $5)
 		 ON CONFLICT (kid_id, day) DO UPDATE SET events = answer_log.events || EXCLUDED.events`,
-		kidID, utcDay(now), int32(kid.State.Seq), now, game.AppendEvent(nil, event),
+		kid.ID, utcDay(now), int32(kid.State.Seq), now, game.AppendEvent(nil, event),
 	); err != nil {
 		return Kid{}, game.Outcome{}, err
 	}
@@ -155,12 +187,13 @@ func (s *Service) Answer(ctx context.Context, userID, kidID int64, expectedSeq u
 }
 
 // History returns every answer the kid has given, oldest first.
-func (s *Service) History(ctx context.Context, userID, kidID int64) ([]LoggedAnswer, error) {
-	if _, err := s.Get(ctx, userID, kidID); err != nil {
+func (s *Service) History(ctx context.Context, userID int64, slug string) ([]LoggedAnswer, error) {
+	kid, err := s.Get(ctx, userID, slug)
+	if err != nil {
 		return nil, err
 	}
 	rows, err := s.pool.Query(ctx,
-		`SELECT first_seq, started_at, events FROM answer_log WHERE kid_id = $1 ORDER BY first_seq`, kidID)
+		`SELECT first_seq, started_at, events FROM answer_log WHERE kid_id = $1 ORDER BY first_seq`, kid.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -194,17 +227,17 @@ type querier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
-func (s *Service) load(ctx context.Context, q querier, userID, kidID int64, lock string) (Kid, *time.Time, error) {
+func (s *Service) load(ctx context.Context, q querier, userID int64, slug, lock string) (Kid, *time.Time, error) {
 	var (
-		kid    = Kid{ID: kidID}
+		kid    = Kid{Slug: slug}
 		seq    int32
 		lastAt *time.Time
 		blob   []byte
 	)
 	err := q.QueryRow(ctx,
-		`SELECT name, seq, last_answer_at, state FROM kids WHERE id = $1 AND user_id = $2 `+lock,
-		kidID, userID,
-	).Scan(&kid.Name, &seq, &lastAt, &blob)
+		`SELECT id, name, seq, last_answer_at, state FROM kids WHERE user_id = $1 AND slug = $2 `+lock,
+		userID, slug,
+	).Scan(&kid.ID, &kid.Name, &seq, &lastAt, &blob)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Kid{}, nil, ErrNotFound
 	}

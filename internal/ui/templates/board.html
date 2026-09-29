@@ -1,0 +1,20 @@
+{{define "board"}}
+<div class="board">
+  {{range .}}
+  <div class="level{{if .Locked}} locked{{end}}">
+    <div class="level-name">Level {{.Number}}</div>
+    <ul class="tiles">
+      {{range .Tiles}}<li class="tile {{.Status}}"><span class="tile-symbol">{{.Symbol}}</span>{{with .Score}}<span class="tile-score">{{.}}</span>{{end}}</li>
+      {{end}}
+    </ul>
+  </div>
+  {{end}}
+</div>
+{{end}}
+
+{{define "legend"}}
+<ul class="legend">
+  {{range .}}<li><span class="swatch {{.Status}}"></span>{{.Label}}</li>
+  {{end}}
+</ul>
+{{end}}

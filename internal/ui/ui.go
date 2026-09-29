@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/http"
 	"path"
+	"slices"
 	"strings"
 )
 
@@ -20,6 +21,10 @@ var templateFS embed.FS
 
 //go:embed static
 var staticFS embed.FS
+
+// shared are the templates parsed into every page: the layout and the partials
+// more than one page uses.
+var shared = []string{"templates/layout.html", "templates/board.html"}
 
 // Renderer renders pages (templates/<page>.html inside layout.html) and named
 // fragments of them for htmx swaps.
@@ -34,12 +39,12 @@ func NewRenderer() *Renderer {
 	}
 	pages := map[string]*template.Template{}
 	for _, name := range names {
-		if path.Base(name) == "layout.html" {
+		if slices.Contains(shared, name) {
 			continue
 		}
 		page := strings.TrimSuffix(path.Base(name), ".html")
 		pages[page] = template.Must(template.New(page).Funcs(template.FuncMap{"asset": Asset}).
-			ParseFS(templateFS, "templates/layout.html", name))
+			ParseFS(templateFS, append(slices.Clone(shared), name)...))
 	}
 	return &Renderer{pages: pages}
 }
