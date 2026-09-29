@@ -254,6 +254,11 @@ func TestLandingPage(t *testing.T) {
 		signup.Request.URL.Query().Get("code_challenge") == "" {
 		t.Errorf("/signup ended at %s: %s", signup.Request.URL, signup.body)
 	}
+	for _, path := range []string{"/signup", "/login"} {
+		if page := b.get(path); !strings.Contains(page.body, `<a href="/">Alphabeter</a>`) {
+			t.Errorf("%s (at %s) has no link to the home page", path, page.Request.URL.Path)
+		}
+	}
 
 	b.signUp("parent@example.com")
 	if res := b.get("/"); res.Request.URL.Path != "/kids" {

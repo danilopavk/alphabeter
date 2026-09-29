@@ -2,7 +2,7 @@
 
 {{define "content"}}
 <main class="card">
-  <p class="brand">Alphabeter</p>
+  <p class="brand"><a href="/">Alphabeter</a></p>
   <h1>Create an account</h1>
   {{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
   <form method="post" action="/oauth/register" class="stack">
