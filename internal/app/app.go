@@ -20,7 +20,7 @@ type Config struct {
 	BaseURL       string // public URL of the app, without trailing slash
 	SecureCookies bool
 	KeyPrefix     string // Redis key prefix
-	TrustProxy    bool   // traffic arrives only through Railway's edge; see clientip.Resolver
+	TrustProxy    bool   // traffic arrives only through the Cloudflare Tunnel; see clientip.Resolver
 	Mailer        email.Sender
 	MailFrom      string // "Alphabeter <no-reply@alphabeter.example>"
 }

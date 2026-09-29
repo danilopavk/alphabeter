@@ -617,7 +617,7 @@ func TestLoginRateLimitUsesTheRealClientIP(t *testing.T) {
 			"code_challenge": {strings.Repeat("a", 43)}, "code_challenge_method": {"S256"},
 			"email": {fmt.Sprintf("guess%d@example.com", n)}, "password": {"wrong password"},
 		}
-		return b.do(b.single, "POST", "/oauth/authorize", form, "X-Forwarded-For", ip).StatusCode
+		return b.do(b.single, "POST", "/oauth/authorize", form, "CF-Connecting-IP", ip).StatusCode
 	}
 	for n := range 10 {
 		if status := attempt("198.51.100.1", n); status != http.StatusUnauthorized {

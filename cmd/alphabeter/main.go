@@ -5,7 +5,8 @@
 //	BASE_URL       required: public URL, e.g. https://alphabeter.example
 //	ADDR           listen address; otherwise :$PORT; otherwise :8090
 //	COOKIE_SECURE  "false" to allow cookies over plain http (local development only)
-//	TRUST_PROXY    "true"/"false": take the visitor's IP from X-Forwarded-For.
+//	TRUST_PROXY    "true"/"false": take the visitor's IP from CF-Connecting-IP; only safe
+//	               when all traffic comes through the Cloudflare Tunnel (see clientip).
 //	               Defaults to true on Railway (RAILWAY_PROJECT_ID set), false elsewhere.
 //	RESEND_API_KEY for sending emails; required on Railway. Without it, emails are
 //	               printed to the log instead (local development).
@@ -183,8 +184,8 @@ func listenAddr(getenv func(string) string) string {
 	return ":8090"
 }
 
-// trustProxy reports whether requests only arrive through a proxy that
-// rebuilds X-Forwarded-For. Railway's edge does, so it is the default there.
+// trustProxy reports whether requests only arrive through Cloudflare. On Railway
+// the Cloudflare Tunnel is the app's only way in, so it is the default there.
 func trustProxy(getenv func(string) string) bool {
 	switch getenv("TRUST_PROXY") {
 	case "true":

@@ -37,9 +37,11 @@ auth codes, login rate limits). Templates and static files are embedded.
 - `internal/web`: the parent-facing app. For sign-in it is an ordinary OAuth client of `idp`
   and keeps the tokens in cookies. Pages use htmx fragments.
 - `internal/ui`: templates and static assets; asset URLs carry a content hash (`{{asset}}`).
-- `internal/clientip`: the visitor's IP behind Railway's proxy and Cloudflare.
+- `internal/clientip`: the visitor's IP behind the Cloudflare Tunnel.
 - `backup/`: the daily backup, a separate Railway cron service: `pg_dump` uploaded to Cloudflare R2.
+- `cloudflared/`: the Cloudflare Tunnel, a separate Railway service and the app's only way in.
 - `internal/app`: wires it all into one handler. Configuration (environment variables) is
   documented at the top of `cmd/alphabeter/main.go`.
 
-Production runs on Railway behind Cloudflare, with Resend for email.
+Production runs on Railway with Resend for email. The app service has no public domain: Cloudflare
+reaches it through the tunnel over Railway's private network.
