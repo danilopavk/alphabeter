@@ -1,0 +1,41 @@
+{{define "title"}}Learn letters and numbers{{end}}
+
+{{define "content"}}
+<main class="card wide landing">
+  <div class="topbar">
+    <p class="brand">Alphabeter</p>
+    <a href="/login">Log in</a>
+  </div>
+  <h1>Learn letters and numbers together</h1>
+  <p class="lead">Alphabeter helps toddlers learn their letters and digits, one big letter at a time,
+    played together with a parent.</p>
+  <p class="cta"><a class="button primary" href="/signup">Create an account</a> <a class="button" href="/login">Log in</a></p>
+
+  <h2>How it works</h2>
+  <ol class="steps">
+    <li>A big letter or digit fills the screen.</li>
+    <li>Your kid says what it is.</li>
+    <li>You tap <b>Yes</b> or <b>No</b>.</li>
+  </ol>
+
+  <h2>It follows your kid</h2>
+  <p>Every letter keeps a score. The ones your kid knows least come up most often, and the ones they
+    already know come up less, so each round goes where it helps.</p>
+
+  <h2>{{.Levels}} levels</h2>
+  <p>It starts with just a few: {{.FirstLevel}}. Once your kid knows them all, the next level
+    unlocks, until all 26 letters and 10 digits are in play. After the last level they can keep
+    playing with the whole alphabet.</p>
+
+  <h2>See their progress</h2>
+  <p>Each letter turns from red to green as your kid learns it. This is a kid halfway through level 2:</p>
+  {{template "board" .Board}}
+  {{template "legend" .Legend}}
+
+  <h2>For the whole family</h2>
+  <p>One account for all your kids, each with their own progress. It runs in the browser on a phone,
+    tablet or laptop, with nothing to install.</p>
+
+  <p class="cta"><a class="button primary" href="/signup">Create an account</a></p>
+</main>
+{{end}}

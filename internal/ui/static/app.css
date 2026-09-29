@@ -232,6 +232,7 @@ body.play { height: 100vh; height: 100dvh; overflow: hidden; background: #fff; }
   font-size: .8rem;
   color: var(--muted);
 }
+.board + .legend { margin-top: .75rem; }
 .swatch {
   display: inline-block;
   width: .8rem;
@@ -263,3 +264,21 @@ body.play { height: 100vh; height: 100dvh; overflow: hidden; background: #fff; }
 .board-panel .tile { width: 4rem; padding: .35rem 0 .3rem; }
 .board-panel .tile-symbol { font-size: 1.8rem; }
 .board-panel .tile-score { font-size: .85rem; }
+
+/* Landing page */
+.landing h1 { font-size: 1.8rem; line-height: 1.2; margin-bottom: .75rem; }
+.landing h2 { font-size: 1.1rem; margin: 2rem 0 .5rem; }
+.landing p { margin: 0 0 .75rem; }
+.lead { font-size: 1.1rem; }
+.steps { margin: 0; padding-left: 1.3rem; display: grid; gap: .25rem; }
+.cta { display: flex; flex-wrap: wrap; gap: .75rem; margin: 1.5rem 0; }
+.button {
+  display: inline-block;
+  padding: .75rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--ink);
+  font-weight: 600;
+  text-decoration: none;
+}
+.button.primary { background: var(--ink); border-color: var(--ink); color: #fff; }

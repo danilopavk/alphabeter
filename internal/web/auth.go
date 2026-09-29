@@ -46,10 +46,9 @@ func New(cfg Config, idpSvc *idp.Service, kidsSvc *kids.Service, renderer *ui.Re
 }
 
 func (s *Server) Routes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/kids", http.StatusSeeOther)
-	})
+	mux.HandleFunc("GET /{$}", s.home)
 	mux.HandleFunc("GET /login", s.login)
+	mux.HandleFunc("GET /signup", s.signup)
 	mux.HandleFunc("GET "+CallbackPath, s.callback)
 	mux.HandleFunc("POST /logout", s.logout)
 
@@ -62,9 +61,18 @@ func (s *Server) Routes(mux *http.ServeMux) {
 
 func (s *Server) redirectURI() string { return s.cfg.BaseURL + CallbackPath }
 
-// login starts a sign-in: remember state and verifier, send the browser to the
-// authorization endpoint.
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
+	s.startSignIn(w, r, "/oauth/authorize")
+}
+
+// signup is login opening on the registration form instead of the login form.
+func (s *Server) signup(w http.ResponseWriter, r *http.Request) {
+	s.startSignIn(w, r, "/oauth/register")
+}
+
+// startSignIn remembers state and verifier and sends the browser to page, the
+// identity provider's login or registration form for this authorization request.
+func (s *Server) startSignIn(w http.ResponseWriter, r *http.Request, page string) {
 	state, verifier := randomString(16), randomString(32)
 	s.setCookie(w, txCookie, state+"."+verifier, CallbackPath, 10*time.Minute)
 	sum := sha256.Sum256([]byte(verifier))
@@ -76,7 +84,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		"code_challenge":        {base64.RawURLEncoding.EncodeToString(sum[:])},
 		"code_challenge_method": {"S256"},
 	}
-	http.Redirect(w, r, "/oauth/authorize?"+q.Encode(), http.StatusFound)
+	http.Redirect(w, r, page+"?"+q.Encode(), http.StatusFound)
 }
 
 func (s *Server) callback(w http.ResponseWriter, r *http.Request) {

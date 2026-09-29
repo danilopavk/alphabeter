@@ -233,6 +233,34 @@ func TestLoginRedirectStartsPKCEFlow(t *testing.T) {
 	}
 }
 
+func TestLandingPage(t *testing.T) {
+	e := start(t)
+	b := e.browser()
+	res := b.do(b.single, "GET", "/", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("/ logged out: %d → %s", res.StatusCode, res.Header.Get("Location"))
+	}
+	for _, want := range []string{
+		"How it works", `href="/signup"`, `href="/login"`, "A, I, K, M, N, P, 0, 1 and 2",
+		`<li class="tile retired">`, tileHTML("locked", "B", ""),
+	} {
+		if !strings.Contains(res.body, want) {
+			t.Errorf("landing page lacks %s", want)
+		}
+	}
+
+	signup := b.get("/signup")
+	if signup.Request.URL.Path != "/oauth/register" || !strings.Contains(signup.body, "<h1>Create an account</h1>") ||
+		signup.Request.URL.Query().Get("code_challenge") == "" {
+		t.Errorf("/signup ended at %s: %s", signup.Request.URL, signup.body)
+	}
+
+	b.signUp("parent@example.com")
+	if res := b.get("/"); res.Request.URL.Path != "/kids" {
+		t.Errorf("/ logged in ended at %s", res.Request.URL)
+	}
+}
+
 func TestLoginSetsSessionCookies(t *testing.T) {
 	e := start(t)
 	b := e.browser()
