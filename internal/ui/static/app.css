@@ -66,6 +66,7 @@ button {
   color: var(--ink);
 }
 button.primary { background: var(--ink); border-color: var(--ink); color: #fff; font-weight: 600; }
+button.danger { background: var(--danger); border-color: var(--danger); color: #fff; font-weight: 600; }
 button:disabled { opacity: .5; cursor: default; }
 
 .error {
@@ -282,3 +283,13 @@ body.play { height: 100vh; height: 100dvh; overflow: hidden; background: #fff; }
   text-decoration: none;
 }
 .button.primary { background: var(--ink); border-color: var(--ink); color: #fff; }
+
+/* Privacy page */
+.prose h2 { font-size: 1.1rem; margin: 2rem 0 .5rem; }
+.prose p, .prose ul { margin: 0 0 .75rem; }
+.prose ul { padding-left: 1.2rem; display: grid; gap: .4rem; }
+.cookies { width: 100%; border-collapse: collapse; font-size: .9rem; margin-bottom: .75rem; }
+.cookies th, .cookies td { text-align: left; vertical-align: top; padding: .45rem .5rem .45rem 0; border-bottom: 1px solid var(--line); }
+.cookies td:first-child { font-family: ui-monospace, monospace; }
+.updated { color: var(--muted); font-size: .85rem; margin-top: 2rem; }
+.footer-links { font-size: .9rem; }

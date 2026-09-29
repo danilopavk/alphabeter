@@ -3,6 +3,7 @@ package web
 import (
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/danilopavk/alphabeter/internal/game"
 )
@@ -84,6 +85,17 @@ func TestFlash(t *testing.T) {
 	for _, c := range cases {
 		if got := flashOf(c.outcome, c.state); *got != c.want {
 			t.Errorf("%s: %+v, want %+v", c.name, *got, c.want)
+		}
+	}
+}
+
+func TestHumanDuration(t *testing.T) {
+	for d, want := range map[time.Duration]string{
+		10 * time.Minute: "10 minutes", time.Minute: "1 minute", time.Hour: "1 hour", 3 * time.Hour: "3 hours",
+		24 * time.Hour: "1 day", 30 * 24 * time.Hour: "30 days", 90 * time.Minute: "90 minutes",
+	} {
+		if got := humanDuration(d); got != want {
+			t.Errorf("humanDuration(%s) = %q, want %q", d, got, want)
 		}
 	}
 }

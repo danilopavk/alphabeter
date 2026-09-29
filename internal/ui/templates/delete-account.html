@@ -1,0 +1,17 @@
+{{define "title"}}Delete your account{{end}}
+
+{{define "content"}}
+<main class="card">
+  <p class="brand">Alphabeter</p>
+  <h1>Delete your account?</h1>
+  <p>This deletes your account and all your kids with their progress, right away. It can't be undone.</p>
+  {{with .Error}}<p class="error" role="alert">{{.}}</p>{{end}}
+  <form method="post" action="/account/delete" class="stack">
+    <label>Your password
+      <input type="password" name="password" autocomplete="current-password" required autofocus>
+    </label>
+    <button type="submit" class="danger">Delete my account</button>
+  </form>
+  <p class="alt"><a href="/kids">Keep my account</a></p>
+</main>
+{{end}}

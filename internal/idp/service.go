@@ -184,6 +184,26 @@ func (s *Service) Authenticate(ctx context.Context, email, password, ip string) 
 	return id, nil
 }
 
+// DeleteAccount deletes a user once their password checks out; attempts count
+// against the login limits. Their kids, progress and refresh tokens go with
+// them (ON DELETE CASCADE). Access tokens already issued stay valid until they
+// expire, as after a password reset.
+func (s *Service) DeleteAccount(ctx context.Context, userID int64, password, ip string) error {
+	var address string
+	err := s.pool.QueryRow(ctx, `SELECT email FROM users WHERE id = $1`, userID).Scan(&address)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrInvalidCredentials
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := s.Authenticate(ctx, address, password, ip); err != nil {
+		return err
+	}
+	_, err = s.pool.Exec(ctx, `DELETE FROM users WHERE id = $1`, userID)
+	return err
+}
+
 // --- authorization codes ---
 
 // CheckClient validates client_id and redirect_uri of an authorization request.

@@ -1,8 +1,10 @@
 package web
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/danilopavk/alphabeter/internal/game"
 )
@@ -64,3 +66,31 @@ var sampleBoard = func() []levelView {
 	}
 	return board(st)
 }()
+
+// privacyPage fills in how long the sign-in cookies last.
+type privacyPage struct {
+	AccessTTL, RefreshTTL, TxTTL string
+}
+
+func (s *Server) privacy(w http.ResponseWriter, r *http.Request) {
+	s.ui.Page(w, http.StatusOK, "privacy", privacyPage{
+		AccessTTL:  humanDuration(s.idp.AccessTTL()),
+		RefreshTTL: humanDuration(s.idp.RefreshTTL()),
+		TxTTL:      humanDuration(txTTL),
+	})
+}
+
+// humanDuration writes a duration in its largest whole unit: "30 days", "1 hour", "90 minutes".
+func humanDuration(d time.Duration) string {
+	n, unit := int64(d/time.Minute), "minute"
+	switch {
+	case d%(24*time.Hour) == 0:
+		n, unit = int64(d/(24*time.Hour)), "day"
+	case d%time.Hour == 0:
+		n, unit = int64(d/time.Hour), "hour"
+	}
+	if n != 1 {
+		unit += "s"
+	}
+	return fmt.Sprintf("%d %s", n, unit)
+}

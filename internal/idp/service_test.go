@@ -164,6 +164,50 @@ func TestAuthenticateIsRateLimitedPerIP(t *testing.T) {
 	}
 }
 
+func TestDeleteAccount(t *testing.T) {
+	f := setup(t)
+	f.svc.cfg.LoginLimit = 3
+	ctx := context.Background()
+	id := f.register(t, "parent@example.com")
+	tokens := f.login(t, id)
+	if _, err := f.svc.pool.Exec(ctx,
+		`INSERT INTO kids (user_id, name, slug, state) VALUES ($1, 'Mia', 'mia', '\x00')`, id); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := f.svc.DeleteAccount(ctx, id, "wrong password", "10.0.0.1"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("wrong password err = %v", err)
+	}
+	if err := f.svc.DeleteAccount(ctx, id, "correct horse", "10.0.0.1"); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"users", "kids", "refresh_tokens"} {
+		var n int
+		if err := f.svc.pool.QueryRow(ctx, `SELECT count(*) FROM `+table).Scan(&n); err != nil || n != 0 {
+			t.Errorf("%s has %d rows (%v) after the account was deleted", table, n, err)
+		}
+	}
+	if _, err := f.svc.Refresh(ctx, "web", tokens.RefreshToken); !errors.Is(err, ErrInvalidGrant) {
+		t.Errorf("refresh after delete err = %v", err)
+	}
+	if err := f.svc.DeleteAccount(ctx, id, "correct horse", "10.0.0.1"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Errorf("deleting again err = %v", err)
+	}
+}
+
+func TestDeleteAccountCountsAgainstTheLoginLimit(t *testing.T) {
+	f := setup(t)
+	f.svc.cfg.LoginLimit = 3
+	ctx := context.Background()
+	id := f.register(t, "parent@example.com")
+	for range 3 {
+		f.svc.DeleteAccount(ctx, id, "wrong", "10.0.0.1")
+	}
+	if err := f.svc.DeleteAccount(ctx, id, "correct horse", "10.0.0.2"); !errors.Is(err, ErrRateLimited) {
+		t.Errorf("err = %v, want ErrRateLimited", err)
+	}
+}
+
 func TestCheckClient(t *testing.T) {
 	f := setup(t)
 	if err := f.svc.CheckClient("web", testRedirect); err != nil {

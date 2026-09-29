@@ -75,6 +75,19 @@ func (r *Renderer) execute(w http.ResponseWriter, status int, page, name string,
 	buf.WriteTo(w)
 }
 
+// Notice is a short message with an optional link or resend button.
+type Notice struct {
+	Title, Message, Warning string
+	LinkHref, LinkText      string
+	Resend                  bool   // show the "send a new verification link" button
+	Email                   string // resend to this address; empty = ask for it
+}
+
+// Notice renders the notice page.
+func (r *Renderer) Notice(w http.ResponseWriter, status int, n Notice) {
+	r.Page(w, status, "notice", n)
+}
+
 // Error renders the generic error page.
 func (r *Renderer) Error(w http.ResponseWriter, status int, message string) {
 	r.Page(w, status, "error", struct{ Message string }{message})

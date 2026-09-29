@@ -27,6 +27,7 @@ const (
 	accessCookie  = "at"
 	refreshCookie = "rt"
 	txCookie      = "oauth_tx" // state + "." + PKCE verifier while a sign-in is in flight
+	txTTL         = 10 * time.Minute
 )
 
 type Config struct {
@@ -49,6 +50,7 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /{$}", s.home)
 	mux.HandleFunc("GET /login", s.login)
 	mux.HandleFunc("GET /signup", s.signup)
+	mux.HandleFunc("GET /privacy", s.privacy)
 	mux.HandleFunc("GET "+CallbackPath, s.callback)
 	mux.HandleFunc("POST /logout", s.logout)
 
@@ -57,6 +59,8 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /kids/{kid}/delete", s.authed(s.deleteKid))
 	mux.HandleFunc("GET /kids/{kid}/play", s.authed(s.play))
 	mux.HandleFunc("POST /kids/{kid}/answer", s.authed(s.answer))
+	mux.HandleFunc("GET /account/delete", s.authed(s.showDeleteAccount))
+	mux.HandleFunc("POST /account/delete", s.authed(s.deleteAccount))
 }
 
 func (s *Server) redirectURI() string { return s.cfg.BaseURL + CallbackPath }
@@ -74,7 +78,7 @@ func (s *Server) signup(w http.ResponseWriter, r *http.Request) {
 // identity provider's login or registration form for this authorization request.
 func (s *Server) startSignIn(w http.ResponseWriter, r *http.Request, page string) {
 	state, verifier := randomString(16), randomString(32)
-	s.setCookie(w, txCookie, state+"."+verifier, CallbackPath, 10*time.Minute)
+	s.setCookie(w, txCookie, state+"."+verifier, CallbackPath, txTTL)
 	sum := sha256.Sum256([]byte(verifier))
 	q := url.Values{
 		"response_type":         {"code"},

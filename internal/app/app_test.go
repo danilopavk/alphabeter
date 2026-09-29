@@ -586,6 +586,65 @@ func TestAddKidValidationAndDelete(t *testing.T) {
 	}
 }
 
+func TestDeleteAccount(t *testing.T) {
+	e := start(t)
+	b := e.browser()
+	b.signUp("parent@example.com")
+	b.addKid("Mia")
+	if list := b.get("/kids"); !strings.Contains(list.body, `href="/account/delete"`) || !strings.Contains(list.body, `href="/privacy"`) {
+		t.Errorf("kids page lacks the delete account or privacy link")
+	}
+	if page := b.get("/account/delete"); page.StatusCode != http.StatusOK || !strings.Contains(page.body, `name="password"`) {
+		t.Fatalf("delete page: %d %s", page.StatusCode, page.body)
+	}
+
+	res := b.post("/account/delete", url.Values{"password": {"wrong password"}})
+	if res.StatusCode != http.StatusUnauthorized || !strings.Contains(res.body, "That password isn&#39;t right.") {
+		t.Errorf("wrong password: %d %s", res.StatusCode, res.body)
+	}
+	res = b.post("/account/delete", url.Values{"password": {"correct horse"}})
+	if res.StatusCode != http.StatusOK || !strings.Contains(res.body, "Account deleted") {
+		t.Fatalf("delete: %d %s", res.StatusCode, res.body)
+	}
+	if b.cookie("at") != "" || b.cookie("rt") != "" {
+		t.Error("session cookies survive the deletion")
+	}
+	var users, kids int
+	e.pool.QueryRow(context.Background(), `SELECT (SELECT count(*) FROM users), (SELECT count(*) FROM kids)`).Scan(&users, &kids)
+	if users != 0 || kids != 0 {
+		t.Errorf("%d users and %d kids left", users, kids)
+	}
+
+	// The address is free again, and the new account starts empty.
+	b.signUp("parent@example.com")
+	if list := b.get("/kids"); strings.Contains(list.body, "Mia") {
+		t.Error("the new account has the old account's kid")
+	}
+}
+
+func TestPrivacyPage(t *testing.T) {
+	e := start(t)
+	b := e.browser()
+	res := b.get("/privacy")
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("/privacy: %d", res.StatusCode)
+	}
+	for _, want := range []string{
+		"United States", "kept for 30 days", "<td>rt</td>", "<td>30 days after your last visit</td>",
+		"<td>15 minutes, renewed automatically</td>", "<td>10 minutes</td>",
+		`<a href="mailto:info@alphabeter.org">info@alphabeter.org</a>`,
+	} {
+		if !strings.Contains(res.body, want) {
+			t.Errorf("privacy page lacks %s", want)
+		}
+	}
+	for _, path := range []string{"/", "/signup"} {
+		if page := b.get(path); !strings.Contains(page.body, `href="/privacy"`) {
+			t.Errorf("%s (at %s) does not link to the privacy page", path, page.Request.URL.Path)
+		}
+	}
+}
+
 func TestLogout(t *testing.T) {
 	e := start(t)
 	b := e.browser()

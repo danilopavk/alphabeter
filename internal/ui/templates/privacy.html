@@ -1,0 +1,74 @@
+{{define "title"}}Privacy{{end}}
+
+{{define "content"}}
+<main class="card wide prose">
+  <p class="brand">Alphabeter</p>
+  <h1>Privacy</h1>
+  <p class="lead">Alphabeter keeps only what it needs to run the game. This page lists all of it: what we
+    store, why, who else handles it, and for how long.</p>
+
+  <h2>What we store</h2>
+  <ul>
+    <li><b>Your account:</b> your email address and your password. The password is stored only as a
+      one-way hash, which can't be turned back into the password. We also note when you signed up
+      and when you confirmed your email.</li>
+    <li><b>Your kids:</b> the name you give each kid, and their game: every answer (which letter or
+      digit, whether it was right, and when) and the scores worked out from those answers. Kids have
+      no accounts or email addresses of their own, and a nickname works just as well as a real name.</li>
+    <li><b>Signing in:</b> the cookies below. Our servers keep only scrambled (hashed) copies of your
+      sign-in tokens.</li>
+    <li><b>Protection from abuse:</b> your IP address and the email address you typed, for up to an
+      hour, to limit how often someone can try passwords or ask for emails.</li>
+  </ul>
+  <p>That's all. Alphabeter has no ads, no analytics, no tracking and no third-party scripts, and we
+    never sell your data.</p>
+
+  <h2>Why</h2>
+  <p>Only to run Alphabeter: to log you in, to pick the next letter and show you your kids' progress,
+    to send the emails you ask for (confirming your address, resetting your password), and to protect
+    accounts from password guessing.</p>
+
+  <h2>Who else handles it</h2>
+  <ul>
+    <li><b>Railway</b> runs the app and its database.</li>
+    <li><b>Cloudflare</b> delivers the site to your browser, protects it from attacks, and stores our
+      database backups.</li>
+    <li><b>Resend</b> sends our emails, so it sees your email address and the emails we send you.</li>
+  </ul>
+  <p>Your data is stored in the United States. While it is there, it is subject to US law and may be
+    accessible to US courts, law enforcement and national security authorities.</p>
+
+  <h2>How long we keep it</h2>
+  <ul>
+    <li>Your account, your kids and their answers stay until you delete them. Deleting a kid deletes
+      their answers; deleting your account deletes everything.</li>
+    <li>The database is backed up daily, and backups are kept for 30 days, so anything you delete is
+      gone from the backups within 30 days.</li>
+    <li>Links in our emails stop working within a day.</li>
+  </ul>
+
+  <h2>Cookies</h2>
+  <p>Alphabeter uses cookies only to log you in. None of them track you.</p>
+  <table class="cookies">
+    <thead><tr><th>Cookie</th><th>What it does</th><th>How long</th></tr></thead>
+    <tbody>
+      <tr><td>at</td><td>Shows you're logged in</td><td>{{.AccessTTL}}, renewed automatically</td></tr>
+      <tr><td>rt</td><td>Renews the <code>at</code> cookie</td><td>{{.RefreshTTL}} after your last visit</td></tr>
+      <tr><td>oauth_tx</td><td>Protects the login itself</td><td>{{.TxTTL}}</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Your choices</h2>
+  <ul>
+    <li>Your kids and their progress are always on your kids page.</li>
+    <li>Delete a kid, with all their answers, from the kids page.</li>
+    <li>Delete your account, with all your kids, from the kids page (<b>Delete account</b>). It takes
+      effect right away and can't be undone.</li>
+    <li>For a copy of everything we have about you, a correction, or any question about your data,
+      email <a href="mailto:info@alphabeter.org">info@alphabeter.org</a>.</li>
+  </ul>
+
+  <p class="updated">Last updated September 29, 2026.</p>
+  <p class="alt"><a href="/">Back to the start</a></p>
+</main>
+{{end}}

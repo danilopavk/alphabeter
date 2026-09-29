@@ -42,6 +42,15 @@ func (res Resolver) Middleware(next http.Handler) http.Handler {
 	})
 }
 
+// Of returns the visitor's IP address as text, once Middleware has run.
+func Of(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
 func remoteAddr(r *http.Request) netip.Addr {
 	a, _ := parse(r.RemoteAddr)
 	return a

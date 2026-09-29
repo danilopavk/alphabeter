@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/url"
 
+	"github.com/danilopavk/alphabeter/internal/clientip"
 	"github.com/danilopavk/alphabeter/internal/ui"
 )
 
@@ -152,7 +152,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	email := r.PostForm.Get("email")
-	userID, err := h.svc.Authenticate(r.Context(), email, r.PostForm.Get("password"), clientIP(r))
+	userID, err := h.svc.Authenticate(r.Context(), email, r.PostForm.Get("password"), clientip.Of(r))
 	switch {
 	case errors.Is(err, ErrInvalidCredentials):
 		h.renderLogin(w, http.StatusUnauthorized, a, email, "Invalid email or password.")
@@ -268,47 +268,27 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	json.NewEncoder(w).Encode(v)
 }
 
-func clientIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
-}
-
 // --- email verification and password reset pages ---
-
-// noticePage is a short message with an optional link or resend button.
-type noticePage struct {
-	Title, Message, Warning string
-	LinkHref, LinkText      string
-	Resend                  bool   // show the "send a new verification link" button
-	Email                   string // resend to this address; empty = ask for it
-}
-
-func (h *Handler) notice(w http.ResponseWriter, status int, p noticePage) {
-	h.ui.Page(w, status, "notice", p)
-}
 
 // sendVerification emails a verification link and shows "Check your email".
 func (h *Handler) sendVerification(w http.ResponseWriter, r *http.Request, email string) {
-	page := noticePage{
+	page := ui.Notice{
 		Title:   "Check your email",
 		Message: "We sent a link to " + email + ". Open it to finish signing up, then log in.",
 		Resend:  true,
 		Email:   email,
 	}
-	switch err := h.svc.SendVerification(r.Context(), email, clientIP(r)); {
+	switch err := h.svc.SendVerification(r.Context(), email, clientip.Of(r)); {
 	case errors.Is(err, ErrRateLimited):
 		page.Warning = "Too many emails to this address. Try again in an hour."
 		page.Resend = false
-		h.notice(w, http.StatusTooManyRequests, page)
+		h.ui.Notice(w, http.StatusTooManyRequests, page)
 	case err != nil:
 		slog.Error("send verification email", "err", err)
 		page.Warning = "We couldn't send the email just now. Try the button below in a minute."
-		h.notice(w, http.StatusOK, page)
+		h.ui.Notice(w, http.StatusOK, page)
 	default:
-		h.notice(w, http.StatusOK, page)
+		h.ui.Notice(w, http.StatusOK, page)
 	}
 }
 
@@ -320,7 +300,7 @@ func (h *Handler) resendVerification(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) verifyEmail(w http.ResponseWriter, r *http.Request) {
 	switch err := h.svc.VerifyEmail(r.Context(), r.URL.Query().Get("token")); {
 	case errors.Is(err, ErrInvalidLink):
-		h.notice(w, http.StatusBadRequest, noticePage{
+		h.ui.Notice(w, http.StatusBadRequest, ui.Notice{
 			Title:   "Link expired",
 			Message: "This link has expired or is invalid. Enter your email to get a new one.",
 			Resend:  true,
@@ -328,7 +308,7 @@ func (h *Handler) verifyEmail(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		h.serverError(w, err)
 	default:
-		h.notice(w, http.StatusOK, noticePage{
+		h.ui.Notice(w, http.StatusOK, ui.Notice{
 			Title: "Email verified", Message: "Thanks! Your account is ready.", LinkHref: "/", LinkText: "Log in",
 		})
 	}
@@ -343,14 +323,14 @@ func (h *Handler) showForgot(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) forgot(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	email := normalizeEmail(r.PostForm.Get("email"))
-	switch err := h.svc.SendPasswordReset(r.Context(), email, clientIP(r)); {
+	switch err := h.svc.SendPasswordReset(r.Context(), email, clientip.Of(r)); {
 	case errors.Is(err, ErrRateLimited):
 		h.ui.Page(w, http.StatusTooManyRequests, "forgot", forgotPage{email, "Too many emails. Try again in an hour."})
 	case err != nil:
 		slog.Error("send password reset email", "err", err)
 		h.ui.Page(w, http.StatusInternalServerError, "forgot", forgotPage{email, "We couldn't send the email just now. Try again in a minute."})
 	default:
-		h.notice(w, http.StatusOK, noticePage{
+		h.ui.Notice(w, http.StatusOK, ui.Notice{
 			Title:   "Check your email",
 			Message: "If an account exists for " + email + ", we've sent it a link to choose a new password. The link works for 1 hour.",
 		})
@@ -360,7 +340,7 @@ func (h *Handler) forgot(w http.ResponseWriter, r *http.Request) {
 type resetPage struct{ Token, Error string }
 
 func (h *Handler) expiredResetLink(w http.ResponseWriter) {
-	h.notice(w, http.StatusBadRequest, noticePage{
+	h.ui.Notice(w, http.StatusBadRequest, ui.Notice{
 		Title:    "Link expired",
 		Message:  "This link has expired or was already used.",
 		LinkHref: "/oauth/reset",
@@ -391,7 +371,7 @@ func (h *Handler) reset(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		h.serverError(w, err)
 	default:
-		h.notice(w, http.StatusOK, noticePage{
+		h.ui.Notice(w, http.StatusOK, ui.Notice{
 			Title:    "Password changed",
 			Message:  "You can now log in with your new password. Any other devices were logged out.",
 			LinkHref: "/",
