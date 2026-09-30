@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"net"
@@ -263,6 +264,62 @@ func TestLandingPage(t *testing.T) {
 	b.signUp("parent@example.com")
 	if res := b.get("/"); res.Request.URL.Path != "/kids" {
 		t.Errorf("/ logged in ended at %s", res.Request.URL)
+	}
+}
+
+func TestSEO(t *testing.T) {
+	e := start(t)
+	b := e.browser()
+	pages := map[string][]string{
+		"/": {
+			"<title>Learn letters and numbers with your toddler · Alphabeter</title>",
+			`<meta name="description" content="A letters-and-numbers game for toddlers, played with a parent.`,
+			`<link rel="canonical" href="` + e.base + `/">`,
+			`<meta property="og:title" content="Learn letters and numbers with your toddler">`,
+			`<meta property="og:url" content="` + e.base + `/">`,
+		},
+		"/privacy": {
+			`<meta name="description" content="What Alphabeter stores about you and your kids`,
+			`<link rel="canonical" href="` + e.base + `/privacy">`,
+		},
+	}
+	for path, wants := range pages {
+		res := b.get(path)
+		for _, want := range wants {
+			if !strings.Contains(res.body, want) {
+				t.Errorf("%s lacks %s", path, want)
+			}
+		}
+		if strings.Contains(res.body, "noindex") {
+			t.Errorf("%s is kept out of search results", path)
+		}
+	}
+	noindex := `<meta name="robots" content="noindex">`
+	for _, path := range []string{"/login", "/signup"} {
+		if res := b.get(path); !strings.Contains(res.body, noindex) {
+			t.Errorf("%s (at %s) can be indexed", path, res.Request.URL.Path)
+		}
+	}
+	b.signUp("parent@example.com")
+	if res := b.get("/kids"); !strings.Contains(res.body, noindex) {
+		t.Error("/kids can be indexed")
+	}
+
+	robots := b.get("/robots.txt")
+	if robots.StatusCode != http.StatusOK || !strings.HasPrefix(robots.Header.Get("Content-Type"), "text/plain") ||
+		!strings.Contains(robots.body, "Sitemap: "+e.base+"/sitemap.xml") || strings.Contains(robots.body, "Disallow: /") {
+		t.Errorf("robots.txt: %d %s\n%s", robots.StatusCode, robots.Header.Get("Content-Type"), robots.body)
+	}
+
+	sitemap := b.get("/sitemap.xml")
+	var urls struct {
+		Locs []string `xml:"url>loc"`
+	}
+	if err := xml.Unmarshal([]byte(sitemap.body), &urls); err != nil || sitemap.Header.Get("Content-Type") != "application/xml; charset=utf-8" {
+		t.Fatalf("sitemap.xml: %v, %s\n%s", err, sitemap.Header.Get("Content-Type"), sitemap.body)
+	}
+	if want := []string{e.base + "/", e.base + "/privacy"}; !slices.Equal(urls.Locs, want) {
+		t.Errorf("sitemap lists %v, want %v", urls.Locs, want)
 	}
 }
 

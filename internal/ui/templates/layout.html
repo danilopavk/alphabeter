@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="htmx-config" content='{"includeIndicatorStyles":false,"allowEval":false}'>
 <title>{{template "title" .}} · Alphabeter</title>
+{{/* Pages stay out of search results unless they define "meta", as the public ones do with "seo". */}}
+{{block "meta" .}}<meta name="robots" content="noindex">{{end}}
 <link rel="icon" href="{{asset "favicon.svg"}}" type="image/svg+xml">
 <link rel="stylesheet" href="{{asset "app.css"}}">
 <script src="{{asset "htmx.min.js"}}" defer></script>
@@ -14,4 +16,15 @@
 {{template "content" .}}
 </body>
 </html>
+{{end}}
+
+{{define "seo"}}
+<meta name="description" content="{{.Description}}">
+<link rel="canonical" href="{{.URL}}">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Alphabeter">
+<meta property="og:title" content="{{.Title}}">
+<meta property="og:description" content="{{.Description}}">
+<meta property="og:url" content="{{.URL}}">
+<meta name="twitter:card" content="summary">
 {{end}}

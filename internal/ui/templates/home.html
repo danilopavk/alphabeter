@@ -1,4 +1,6 @@
-{{define "title"}}Learn letters and numbers{{end}}
+{{define "title"}}{{.SEO.Title}}{{end}}
+
+{{define "meta"}}{{template "seo" .SEO}}{{end}}
 
 {{define "content"}}
 <main class="card wide landing">

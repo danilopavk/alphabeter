@@ -1,7 +1,9 @@
 package web
 
 import (
+	"encoding/xml"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -9,7 +11,18 @@ import (
 	"github.com/danilopavk/alphabeter/internal/game"
 )
 
+// seo is what search engines and link previews show for a public page. Every
+// other page is marked noindex (see layout.html).
+type seo struct {
+	Title, Description string
+	URL                string // canonical, absolute
+}
+
+// publicPages are the pages search engines may index, in the sitemap.
+var publicPages = []string{"/", "/privacy"}
+
 type homePage struct {
+	SEO        seo
 	FirstLevel string // e.g. "A, I, K, M, N, P, 0, 1 and 2"
 	Levels     int
 	Board      []levelView
@@ -26,6 +39,12 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.ui.Page(w, http.StatusOK, "home", homePage{
+		SEO: seo{
+			Title: "Learn letters and numbers with your toddler",
+			Description: "A letters-and-numbers game for toddlers, played with a parent. Your kid names the big " +
+				"letter on screen, you tap Yes or No, and the game adapts to what they know.",
+			URL: s.cfg.BaseURL + "/",
+		},
 		FirstLevel: listSymbols(game.Batches[0]),
 		Levels:     len(game.Batches),
 		Board:      sampleBoard,
@@ -69,11 +88,17 @@ var sampleBoard = func() []levelView {
 
 // privacyPage fills in how long the sign-in cookies last.
 type privacyPage struct {
+	SEO                          seo
 	AccessTTL, RefreshTTL, TxTTL string
 }
 
 func (s *Server) privacy(w http.ResponseWriter, r *http.Request) {
 	s.ui.Page(w, http.StatusOK, "privacy", privacyPage{
+		SEO: seo{
+			Title:       "Privacy",
+			Description: "What Alphabeter stores about you and your kids, why, who else handles it, and for how long.",
+			URL:         s.cfg.BaseURL + "/privacy",
+		},
 		AccessTTL:  humanDuration(s.idp.AccessTTL()),
 		RefreshTTL: humanDuration(s.idp.RefreshTTL()),
 		TxTTL:      humanDuration(txTTL),
@@ -93,4 +118,32 @@ func humanDuration(d time.Duration) string {
 		unit += "s"
 	}
 	return fmt.Sprintf("%d %s", n, unit)
+}
+
+// robots lets crawlers everywhere: pages that shouldn't be in search results
+// say so themselves (noindex), which crawlers only see if they may fetch them.
+func (s *Server) robots(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	fmt.Fprintf(w, "User-agent: *\nDisallow:\n\nSitemap: %s/sitemap.xml\n", s.cfg.BaseURL)
+}
+
+func (s *Server) sitemap(w http.ResponseWriter, r *http.Request) {
+	type url struct {
+		Loc string `xml:"loc"`
+	}
+	set := struct {
+		XMLName xml.Name `xml:"http://www.sitemaps.org/schemas/sitemap/0.9 urlset"`
+		URLs    []url    `xml:"url"`
+	}{}
+	for _, path := range publicPages {
+		set.URLs = append(set.URLs, url{s.cfg.BaseURL + path})
+	}
+	out, err := xml.MarshalIndent(set, "", "  ")
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+	io.WriteString(w, xml.Header)
+	w.Write(out)
 }

@@ -51,6 +51,8 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /login", s.login)
 	mux.HandleFunc("GET /signup", s.signup)
 	mux.HandleFunc("GET /privacy", s.privacy)
+	mux.HandleFunc("GET /robots.txt", s.robots)
+	mux.HandleFunc("GET /sitemap.xml", s.sitemap)
 	mux.HandleFunc("GET "+CallbackPath, s.callback)
 	mux.HandleFunc("POST /logout", s.logout)
 
