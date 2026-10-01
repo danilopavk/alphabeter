@@ -13,14 +13,13 @@ func TestProgress(t *testing.T) {
 		state game.State
 		want  string
 	}{
-		{game.State{Batch: 1, Seq: 0}, "Level 1 of 4 · 0 answers"},
-		{game.State{Batch: 2, Seq: 1}, "Level 2 of 4 · 1 answer"},
-		{game.State{Batch: 4, Seq: 812, Completed: true}, "All levels done · 812 answers"},
+		{game.State{InPlay: 9, Seq: 0}, "9 of 36 in play · 0 answers"},
+		{game.State{InPlay: 15, Seq: 1}, "15 of 36 in play · 1 answer"},
+		{game.State{InPlay: 36, Seq: 812}, "All 36 in play · 812 answers"},
 	}
 	for _, c := range cases {
 		if got := progress(c.state); got != c.want {
-			t.Errorf("progress(batch %d, seq %d, completed %v) = %q, want %q",
-				c.state.Batch, c.state.Seq, c.state.Completed, got, c.want)
+			t.Errorf("progress(in play %d, seq %d) = %q, want %q", c.state.InPlay, c.state.Seq, got, c.want)
 		}
 	}
 }
@@ -33,29 +32,34 @@ func TestFormatScore(t *testing.T) {
 	}
 }
 
-func stateShowing(batch uint8, st game.SymbolState) game.State {
-	s := game.State{Batch: batch, Current: 0}
-	s.Symbols[0] = st
+// stateWith returns a state with n symbols in play, all scoring score.
+func stateWith(n uint8, score uint32) game.State {
+	s := game.State{InPlay: n}
+	for _, x := range game.Order[:n] {
+		s.Symbols[x].Score = score
+	}
 	return s
 }
 
-func TestScoreNote(t *testing.T) {
+func TestNextBars(t *testing.T) {
+	// 18 in play: the 10th to join needs top 196.4, average 162.9, lowest 106.9;
+	// 17 at 170 and one at 100 average 166.1.
+	mixed := stateWith(18, 1700)
+	mixed.Symbols[game.Order[5]].Score = 1000
 	cases := []struct {
 		name  string
 		state game.State
-		want  string
+		want  []barView
 	}{
-		{"below the level threshold", stateShowing(1, game.SymbolState{Score: 1070}), "Over 130 needed for the next level"},
-		{"exactly the threshold", stateShowing(1, game.SymbolState{Score: 1300}), "Over 130 needed for the next level"},
-		{"above the threshold", stateShowing(2, game.SymbolState{Score: 1420}), "Over 130 ✓ · retires at 160"},
-		{"retired filler", stateShowing(3, game.SymbolState{Score: 1700, Retired: true}), "Retired until the next level"},
-		{"last level", stateShowing(4, game.SymbolState{Score: 1420}), "Retires at 160 · retire all to finish"},
-		{"retired in the last level", stateShowing(4, game.SymbolState{Score: 1700, Retired: true}), "Retired"},
-		{"free play", game.State{Batch: 4, Completed: true}, "Free play"},
+		{"start", stateWith(9, 1000), []barView{
+			{"average", "100", "110", false}, {"top", "100", "120", false}, {"lowest", "100", "100", true}}},
+		{"some bars reached", mixed, []barView{
+			{"average", "166.1", "162.9", true}, {"top", "170", "196.4", false}, {"lowest", "100", "106.9", false}}},
+		{"all in play", stateWith(36, 1000), nil},
 	}
 	for _, c := range cases {
-		if got := scoreNote(c.state); got != c.want {
-			t.Errorf("%s: %q, want %q", c.name, got, c.want)
+		if got := nextBars(c.state); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%s: %+v, want %+v", c.name, got, c.want)
 		}
 	}
 }
@@ -67,20 +71,14 @@ func TestFlash(t *testing.T) {
 		state   game.State // after the answer
 		want    flashView
 	}{
-		{"right", game.Outcome{Symbol: 0, Correct: true, Before: 1070, After: 1085}, game.State{Batch: 1},
+		{"right", game.Outcome{Symbol: 0, Correct: true, Before: 1070, After: 1085}, game.State{InPlay: 9},
 			flashView{Symbol: "A", Correct: true, To: "108.5", Delta: "+1.5"}},
-		{"wrong", game.Outcome{Symbol: 26, Before: 1070, After: 1065}, game.State{Batch: 1},
+		{"wrong", game.Outcome{Symbol: 26, Before: 1070, After: 1065}, game.State{InPlay: 9},
 			flashView{Symbol: "0", To: "106.5", Delta: "−0.5"}},
-		{"retired", game.Outcome{Symbol: 0, Correct: true, Before: 1590, After: 1610, Retired: true}, game.State{Batch: 2},
-			flashView{Symbol: "A", Correct: true, To: "161", Delta: "+2", Message: "Retired until the next level"}},
-		{"retired in the last level", game.Outcome{Symbol: 0, Correct: true, Before: 1590, After: 1610, Retired: true}, game.State{Batch: 4},
-			flashView{Symbol: "A", Correct: true, To: "161", Delta: "+2", Message: "Retired"}},
-		{"level up", game.Outcome{Symbol: 0, Correct: true, Before: 1290, After: 1310, LevelUp: true}, game.State{Batch: 3},
-			flashView{Symbol: "A", Correct: true, To: "131", Delta: "+2", Message: "Level 3 unlocked!"}},
-		{"no change at zero", game.Outcome{Symbol: 0, Before: 0, After: 0}, game.State{Batch: 1},
+		{"a new symbol joins", game.Outcome{Symbol: 0, Correct: true, Before: 1195, After: 1200, Added: true}, game.State{InPlay: 10},
+			flashView{Symbol: "A", Correct: true, To: "120", Delta: "+0.5", Message: "New letter: E", Joined: true}},
+		{"no change at zero", game.Outcome{Symbol: 0, Before: 0, After: 0}, game.State{InPlay: 9},
 			flashView{Symbol: "A", To: "0", Delta: "±0"}},
-		{"completed", game.Outcome{Symbol: 0, Correct: true, Before: 1590, After: 1610, Retired: true, Completed: true}, game.State{Batch: 4, Completed: true},
-			flashView{Symbol: "A", Correct: true, To: "161", Delta: "+2", Message: "All levels done!"}},
 	}
 	for _, c := range cases {
 		if got := flashOf(c.outcome, c.state); *got != c.want {
@@ -101,61 +99,45 @@ func TestHumanDuration(t *testing.T) {
 }
 
 func TestBoard(t *testing.T) {
-	st := game.State{Batch: 2}
-	for i := range st.Symbols {
-		st.Symbols[i].Score = game.StartScore
-	}
-	set := func(char string, score uint32, retired bool) {
+	st := stateWith(12, game.StartScore) // the start symbols, E, R and T
+	set := func(char string, score uint32) {
 		sym, _ := game.ParseSymbol(char)
-		st.Symbols[sym] = game.SymbolState{Score: score, Retired: retired}
+		st.Symbols[sym] = game.SymbolState{Score: score}
 	}
-	set("A", 1420, false)
-	set("I", 995, false)
-	set("K", 1301, false)
-	set("M", 1650, true)
-	set("N", 1300, false)
-	set("E", 0, false)
-	set("B", 1450, false) // locked, so its score is not shown
+	set("A", 2420)
+	set("I", 995)
+	set("K", 1500)
+	set("M", 1499)
+	set("N", 2000)
+	set("P", 1999)
+	set("E", 0)
+	set("3", 1450) // not in play, so its score is not shown
 
-	levels := board(st)
-	if len(levels) != len(game.Batches) {
-		t.Fatalf("%d levels, want %d", len(levels), len(game.Batches))
+	tiles := board(st)
+	if len(tiles) != game.NumSymbols {
+		t.Fatalf("%d tiles, want %d", len(tiles), game.NumSymbols)
 	}
-	want := levelView{Number: 1, Tiles: []tileView{
-		{"A", "142", "known"}, {"I", "99.5", "low"}, {"K", "130.1", "known"}, {"M", "165", "retired"},
-		{"N", "130", "learning"}, {"P", "100", "learning"},
-		{"0", "100", "learning"}, {"1", "100", "learning"}, {"2", "100", "learning"},
-	}}
-	if !reflect.DeepEqual(levels[0], want) {
-		t.Errorf("level 1:\n got %+v\nwant %+v", levels[0], want)
+	want := []tileView{
+		{"A", "242", "mastered"}, {"I", "99.5", "low"}, {"K", "150", "known"}, {"M", "149.9", "learning"},
+		{"N", "200", "mastered"}, {"P", "199.9", "known"}, {"0", "100", "learning"}, {"1", "100", "learning"},
+		{"2", "100", "learning"}, {"E", "0", "low"}, {"R", "100", "learning"}, {"T", "100", "learning"},
+		{"3", "", "locked"},
 	}
-	if l := levels[1]; l.Number != 2 || l.Locked || l.Tiles[0] != (tileView{"E", "0", "low"}) {
-		t.Errorf("level 2: %+v", l)
+	if !reflect.DeepEqual(tiles[:len(want)], want) {
+		t.Errorf("tiles:\n got %+v\nwant %+v", tiles[:len(want)], want)
 	}
-	for _, l := range levels[2:] {
-		if !l.Locked {
-			t.Errorf("level %d is not locked", l.Number)
-		}
-		for _, tile := range l.Tiles {
-			if tile.Status != "locked" || tile.Score != "" {
-				t.Errorf("level %d: %+v", l.Number, tile)
-			}
+	for _, tile := range tiles[len(want):] {
+		if tile.Status != "locked" || tile.Score != "" {
+			t.Errorf("%+v is not locked", tile)
 		}
 	}
-	if l := levels[2]; l.Number != 3 || l.Tiles[0].Symbol != "B" || len(l.Tiles) != len(game.Batches[2]) {
-		t.Errorf("level 3: %+v", l)
-	}
-
-	done := game.State{Batch: 4, Completed: true}
-	for _, l := range board(done) {
-		if l.Locked {
-			t.Errorf("level %d locked in free play", l.Number)
-		}
+	if last := tiles[len(tiles)-1]; last.Symbol != "Z" {
+		t.Errorf("last tile %s, want Z", last.Symbol)
 	}
 }
 
 func TestBoardLegend(t *testing.T) {
-	want := []legendItem{{"low", "Under 100"}, {"learning", "100–130"}, {"known", "Over 130"}, {"retired", "Retired"}}
+	want := []legendItem{{"low", "Under 100"}, {"learning", "100–150"}, {"known", "150–200"}, {"mastered", "200+"}}
 	if !reflect.DeepEqual(boardLegend, want) {
 		t.Errorf("legend %+v, want %+v", boardLegend, want)
 	}

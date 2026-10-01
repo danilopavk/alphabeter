@@ -15,7 +15,7 @@ type kidView struct {
 	Path     string // URL segment, e.g. "mia"
 	Name     string
 	Progress string
-	Board    []levelView
+	Board    []tileView
 }
 
 type kidsPage struct {
@@ -31,24 +31,25 @@ type playView struct {
 	Symbol string
 	Seq    uint32
 	Score  string     // of the symbol on screen
-	Note   string     // what that score means, e.g. "Over 130 needed for the next level"
+	Bars   []barView  // the scores now and what the next letter needs; nil once all are in play
 	Flash  *flashView // the answer just given, animated; nil on a plain page load
-	Board  []levelView
+	Board  []tileView
 	Legend []legendItem
 }
 
-// levelView is one level (batch) of the progress board.
-type levelView struct {
-	Number int
-	Locked bool
-	Tiles  []tileView
+// barView is one bar the next letter needs, e.g. average 100 / 110.
+type barView struct {
+	Name    string // average, top or lowest
+	Now     string
+	Need    string
+	Reached bool
 }
 
 // tileView is one symbol on the progress board.
 type tileView struct {
 	Symbol string
 	Score  string // empty while locked
-	Status string // locked, low, learning, known or retired; also its CSS class
+	Status string // locked, low, learning, known or mastered; also its CSS class
 }
 
 type legendItem struct {
@@ -56,11 +57,18 @@ type legendItem struct {
 	Label  string
 }
 
+// The board's score bands: under StartScore, then up to knownScore, up to
+// masteredScore, and above.
+const (
+	knownScore    = 1500
+	masteredScore = 2000
+)
+
 var boardLegend = []legendItem{
 	{"low", "Under " + formatScore(game.StartScore)},
-	{"learning", formatScore(game.StartScore) + "–" + formatScore(game.UnlockScore)},
-	{"known", "Over " + formatScore(game.UnlockScore)},
-	{"retired", "Retired"},
+	{"learning", formatScore(game.StartScore) + "–" + formatScore(knownScore)},
+	{"known", formatScore(knownScore) + "–" + formatScore(masteredScore)},
+	{"mastered", formatScore(masteredScore) + "+"},
 }
 
 // flashView shows the answered symbol's new score for a moment.
@@ -69,7 +77,8 @@ type flashView struct {
 	Correct bool
 	To      string // the new score
 	Delta   string // the change, e.g. "+0.5"
-	Message string // level up, retired, completed
+	Message string // a new letter joined
+	Joined  bool   // a new letter joined: it is on screen, introduced with an animation
 }
 
 func (s *Server) listKids(w http.ResponseWriter, r *http.Request, userID int64) {
@@ -101,38 +110,34 @@ func progress(st game.State) string {
 	if st.Seq == 1 {
 		answers = "answer"
 	}
-	if st.Completed {
-		return fmt.Sprintf("All levels done · %d %s", st.Seq, answers)
+	if int(st.InPlay) == game.NumSymbols {
+		return fmt.Sprintf("All %d in play · %d %s", game.NumSymbols, st.Seq, answers)
 	}
-	return fmt.Sprintf("Level %d of %d · %d %s", st.Batch, len(game.Batches), st.Seq, answers)
+	return fmt.Sprintf("%d of %d in play · %d %s", st.InPlay, game.NumSymbols, st.Seq, answers)
 }
 
-// board is the progress dashboard: every symbol by level, colored by score.
-func board(st game.State) []levelView {
-	levels := make([]levelView, len(game.Batches))
-	for i, batch := range game.Batches {
-		levels[i] = levelView{Number: i + 1, Locked: i >= int(st.Batch)}
-		for _, sym := range batch {
-			tile := tileView{Symbol: sym.String(), Status: tileStatus(st, sym)}
-			if tile.Status != "locked" {
-				tile.Score = formatScore(st.Symbols[sym].Score)
-			}
-			levels[i].Tiles = append(levels[i].Tiles, tile)
+// board is the progress dashboard: every symbol in the order they join, colored by score.
+func board(st game.State) []tileView {
+	tiles := make([]tileView, len(game.Order))
+	for i, sym := range game.Order {
+		tiles[i] = tileView{Symbol: sym.String(), Status: tileStatus(st, sym)}
+		if tiles[i].Status != "locked" {
+			tiles[i].Score = formatScore(st.Symbols[sym].Score)
 		}
 	}
-	return levels
+	return tiles
 }
 
 func tileStatus(st game.State, sym game.Symbol) string {
-	s := st.Symbols[sym]
+	score := st.Symbols[sym].Score
 	switch {
-	case !st.IsUnlocked(sym):
+	case !st.IsInPlay(sym):
 		return "locked"
-	case s.Retired:
-		return "retired"
-	case s.Score > game.UnlockScore:
+	case score >= masteredScore:
+		return "mastered"
+	case score >= knownScore:
 		return "known"
-	case s.Score < game.StartScore:
+	case score < game.StartScore:
 		return "low"
 	default:
 		return "learning"
@@ -216,7 +221,7 @@ func viewOf(k kids.Kid, flash *flashView) playView {
 		Symbol: st.Current.String(),
 		Seq:    st.Seq,
 		Score:  formatScore(st.Symbols[st.Current].Score),
-		Note:   scoreNote(st),
+		Bars:   nextBars(st),
 		Flash:  flash,
 		Board:  board(st),
 		Legend: boardLegend,
@@ -242,24 +247,18 @@ func formatDelta(tenths int64) string {
 	}
 }
 
-// scoreNote explains what the score of the symbol on screen needs next.
-func scoreNote(st game.State) string {
-	sym := st.Symbols[st.Current]
-	lastLevel := int(st.Batch) == len(game.Batches)
-	switch {
-	case st.Completed:
-		return "Free play"
-	case sym.Retired && lastLevel:
-		return "Retired"
-	case sym.Retired:
-		return "Retired until the next level"
-	case lastLevel:
-		return "Retires at " + formatScore(game.RetireScore) + " · retire all to finish"
-	case sym.Score > game.UnlockScore:
-		return "Over " + formatScore(game.UnlockScore) + " ✓ · retires at " + formatScore(game.RetireScore)
-	default:
-		return "Over " + formatScore(game.UnlockScore) + " needed for the next level"
+// nextBars shows the average, top and lowest score next to what the next
+// letter needs.
+func nextBars(st game.State) []barView {
+	bars, ok := st.NextBars()
+	if !ok {
+		return nil
 	}
+	now := st.Standing()
+	bar := func(name string, value, need uint32) barView {
+		return barView{Name: name, Now: formatScore(value), Need: formatScore(need), Reached: value >= need}
+	}
+	return []barView{bar("average", now.Avg, bars.Avg), bar("top", now.Top, bars.Top), bar("lowest", now.Low, bars.Low)}
 }
 
 // flashOf describes an answer for the animation; st is the state after it.
@@ -270,15 +269,9 @@ func flashOf(o game.Outcome, st game.State) *flashView {
 		To:      formatScore(o.After),
 		Delta:   formatDelta(int64(o.After) - int64(o.Before)),
 	}
-	switch {
-	case o.Completed:
-		f.Message = "All levels done!"
-	case o.LevelUp:
-		f.Message = fmt.Sprintf("Level %d unlocked!", st.Batch)
-	case o.Retired && int(st.Batch) == len(game.Batches):
-		f.Message = "Retired"
-	case o.Retired:
-		f.Message = "Retired until the next level"
+	if o.Added {
+		f.Message = "New letter: " + st.Newest().String()
+		f.Joined = true
 	}
 	return f
 }

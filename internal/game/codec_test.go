@@ -22,8 +22,7 @@ func played(n int, seed uint64) (State, []Event) {
 func TestStateRoundTrip(t *testing.T) {
 	rng := seeded(11)
 	s := NewState(rng)
-	sawRetired, sawCompleted := false, false
-	for range 5000 { // a whole game at 80% right, including free play
+	for range 5000 { // a whole game at 80% right, past every symbol joining
 		s = s.Answer(rng.IntN(5) != 0, rng)
 		blob := EncodeState(s)
 		if len(blob) != StateSize || StateSize != 399 {
@@ -36,24 +35,19 @@ func TestStateRoundTrip(t *testing.T) {
 		if got != s {
 			t.Fatalf("round trip mismatch at seq %d:\n got %+v\nwant %+v", s.Seq, got, s)
 		}
-		for _, st := range s.Symbols {
-			sawRetired = sawRetired || st.Retired
-		}
-		sawCompleted = sawCompleted || s.Completed
 	}
-	if !sawRetired || !sawCompleted {
-		t.Errorf("flags not exercised: retired %v, completed %v", sawRetired, sawCompleted)
+	if s.InPlay != NumSymbols {
+		t.Errorf("only %d symbols in play", s.InPlay)
 	}
 }
 
 func TestStateLayout(t *testing.T) {
 	s := initialState()
-	s.Batch = 4
-	s.Completed = true
+	s.InPlay = 36
 	s.Current = 35
-	s.Symbols[0] = SymbolState{Score: 0x01020304, Recency: 7, Streak: -2, LastSeq: 0x0a0b0c0d, Retired: true}
+	s.Symbols[0] = SymbolState{Score: 0x01020304, Recency: 7, Streak: -2, LastSeq: 0x0a0b0c0d}
 	blob := EncodeState(s)
-	want := []byte{3, 0x80 | 4, 35, 0x04, 0x03, 0x02, 0x01, 0x80 | 7, 0xfe, 0xff, 0x0d, 0x0c, 0x0b, 0x0a}
+	want := []byte{4, 36, 35, 0x04, 0x03, 0x02, 0x01, 7, 0xfe, 0xff, 0x0d, 0x0c, 0x0b, 0x0a}
 	if !bytes.Equal(blob[:len(want)], want) {
 		t.Errorf("layout = % x, want % x", blob[:len(want)], want)
 	}
@@ -62,50 +56,59 @@ func TestStateLayout(t *testing.T) {
 	}
 }
 
+// Versions 1–3 stored a batch (level) instead of the number in play, and
+// versions 2–3 a retired flag; they load with their levels' symbols in play.
 func TestDecodeStateReadsOlderVersions(t *testing.T) {
 	s, _ := played(200, 3)
-	for i := range s.Symbols {
-		s.Symbols[i].Retired = false // version 1 had no retired flag
+	cases := []struct {
+		version, batch byte
+		retired        bool
+		inPlay         uint8
+	}{
+		{1, 1, false, 9},
+		{2, 2, true, 15},
+		{3, 3, true, 23},
+		{3, 4, false, 36},
+		{3, 0x80 | 4, true, 36}, // completed
 	}
-	blob := EncodeState(s)
-	for _, version := range []byte{1, 2} {
-		blob[0] = version
-		if got, err := DecodeState(s.Seq, blob); err != nil || got != s {
-			t.Errorf("version %d blob: err %v, equal %v", version, err, got == s)
+	for _, c := range cases {
+		blob := EncodeState(s)
+		blob[0], blob[1] = c.version, c.batch
+		if c.retired {
+			blob[3+4] |= 0x80
 		}
-	}
-
-	v1 := bytes.Clone(blob)
-	v1[0] = 1
-	v1[3+4] |= 0x80
-	if _, err := DecodeState(s.Seq, v1); err == nil {
-		t.Error("version 1 blob with a retired flag accepted")
-	}
-	v2 := bytes.Clone(blob)
-	v2[0] = 2
-	v2[1] |= 0x80
-	if _, err := DecodeState(s.Seq, v2); err == nil {
-		t.Error("version 2 blob with a completed flag accepted")
+		want := s
+		want.InPlay = c.inPlay
+		if got, err := DecodeState(s.Seq, blob); err != nil || got != want {
+			t.Errorf("version %d, batch byte %#x: err %v, in play %d, equal %v", c.version, c.batch, err, got.InPlay, got == want)
+		}
 	}
 }
 
 func TestDecodeStateRejectsBadInput(t *testing.T) {
 	good := EncodeState(NewState(seeded(1)))
-	mutate := func(i int, v byte) []byte {
+	mutate := func(changes ...[2]int) []byte {
 		b := bytes.Clone(good)
-		b[i] = v
+		for _, c := range changes {
+			b[c[0]] = byte(c[1])
+		}
 		return b
 	}
 	cases := map[string][]byte{
-		"short":             good[:StateSize-1],
-		"long":              append(bytes.Clone(good), 0),
-		"unknown version":   mutate(0, 4),
-		"batch 0":           mutate(1, 0),
-		"batch too high":    mutate(1, 5),
-		"batch flag bits":   mutate(1, 0x40|1),
-		"current too high":  mutate(2, NumSymbols),
-		"recency above max": mutate(3+4, MaxRecency+1),
-		"reserved bits set": mutate(3+4, 0x40|5),
+		"short":                     good[:StateSize-1],
+		"long":                      append(bytes.Clone(good), 0),
+		"unknown version":           mutate([2]int{0, 5}),
+		"fewer than the start":      mutate([2]int{1, StartCount - 1}),
+		"more than all":             mutate([2]int{1, NumSymbols + 1}),
+		"current too high":          mutate([2]int{2, NumSymbols}),
+		"recency above max":         mutate([2]int{3 + 4, MaxRecency + 1}),
+		"reserved bits set":         mutate([2]int{3 + 4, 0x40 | 5}),
+		"retired flag in version 4": mutate([2]int{3 + 4, 0x80 | 5}),
+		"batch 0":                   mutate([2]int{0, 3}, [2]int{1, 0}),
+		"batch too high":            mutate([2]int{0, 3}, [2]int{1, 5}),
+		"batch flag bits":           mutate([2]int{0, 3}, [2]int{1, 0x40 | 1}),
+		"retired flag in version 1": mutate([2]int{0, 1}, [2]int{1, 1}, [2]int{3 + 4, 0x80 | 5}),
+		"completed in version 2":    mutate([2]int{0, 2}, [2]int{1, 0x80 | 4}),
 	}
 	for name, blob := range cases {
 		if _, err := DecodeState(0, blob); err == nil {

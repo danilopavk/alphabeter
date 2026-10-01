@@ -8,11 +8,11 @@
   --danger-bg: #fdecea;
   --yes: #1a7f37;
   --no: #c62828;
-  /* Progress board: under 100, 100–130, over 130, retired. */
+  /* Progress board: under 100, 100–150, 150–200, 200 and up. */
   --low: #c62828;
   --learning: #e6e6e6;
   --known: #1a7f37;
-  --retired: #0b4a20;
+  --mastered: #0b4a20;
   --radius: .65rem;
   color-scheme: light;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -144,6 +144,31 @@ body.play { height: 100vh; height: 100dvh; overflow: hidden; background: #fff; }
 }
 .answers .yes { background: var(--yes); }
 .answers .no { background: var(--no); }
+
+/* A new letter joins: it grows from small to full size and spins, and the
+   game waits for it. For those 2 seconds (as long as the flash) a layer over
+   the dimmed answers takes the taps; then it hides, like the flash. A data
+   attribute, not a class: htmx carries the old stage's class over to the
+   new one for a moment while it settles a swap. */
+[data-joining] .symbol { animation: join 2s ease-in-out; }
+@keyframes join {
+  0% { transform: scale(.05) rotate(0); }
+  45% { transform: scale(1) rotate(0); }
+  95%, 100% { transform: scale(1) rotate(360deg); }
+}
+[data-joining] .answers { position: relative; animation: answers-wait 2s step-end; }
+@keyframes answers-wait {
+  from { opacity: .35; }
+}
+[data-joining] .answers::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  animation: flash-hide 0s 2s forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-joining] .symbol { animation: none; }
+}
 .back {
   position: fixed;
   top: .5rem;
@@ -178,6 +203,9 @@ body.play { height: 100vh; height: 100dvh; overflow: hidden; background: #fff; }
 .score-value, .score-note, .score-hint { display: block; }
 .score-value { font-weight: 700; font-size: 1rem; color: var(--ink); }
 .score-note { font-size: .8rem; color: var(--muted); }
+.score-note .bar { white-space: nowrap; } /* wrap between bars, never inside one */
+.score-note b { color: var(--ink); }
+.score-note .tick { color: var(--yes); font-weight: 700; }
 .score-hint { margin-top: 1rem; font-size: .72rem; color: var(--muted); } /* a blank line under the note */
 
 /* The answer just given: the letter's new score, shown for 2 seconds. */
@@ -203,9 +231,7 @@ body.play { height: 100vh; height: 100dvh; overflow: hidden; background: #fff; }
   to { visibility: hidden; }
 }
 
-/* Progress board: every symbol by level, colored by score. */
-.board { display: grid; gap: .5rem; }
-.level-name { font-size: .75rem; color: var(--muted); margin-bottom: .2rem; }
+/* Progress board: every symbol in the order they join, colored by score. */
 .tiles { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: .3rem; }
 .tile {
   width: 2.9rem;
@@ -220,10 +246,9 @@ body.play { height: 100vh; height: 100dvh; overflow: hidden; background: #fff; }
 .tile-score { display: block; font-size: .68rem; font-variant-numeric: tabular-nums; }
 .tile.low { background: var(--low); color: #fff; }
 .tile.known { background: var(--known); color: #fff; }
-.tile.retired { background: var(--retired); color: #fff; }
-.tile.retired .tile-score::after { content: " ✓"; }
+.tile.mastered { background: var(--mastered); color: #fff; }
+.tile.mastered .tile-score::after { content: " ✓"; }
 .tile.locked { background: none; color: #b5b5b5; box-shadow: inset 0 0 0 1px var(--line); }
-.level.locked .level-name { color: #b5b5b5; }
 
 .legend {
   list-style: none;
@@ -247,7 +272,7 @@ body.play { height: 100vh; height: 100dvh; overflow: hidden; background: #fff; }
 }
 .swatch.low { background: var(--low); }
 .swatch.known { background: var(--known); }
-.swatch.retired { background: var(--retired); }
+.swatch.mastered { background: var(--mastered); }
 
 /* On the play screen the board covers everything until D, Esc or Close. */
 .board-panel {
@@ -262,7 +287,7 @@ body.play { height: 100vh; height: 100dvh; overflow: hidden; background: #fff; }
 .board-panel > * { max-width: 44rem; margin-left: auto; margin-right: auto; }
 .board-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: .75rem; }
 .board-head h2 { margin: 0; font-size: 1.3rem; overflow-wrap: anywhere; }
-.board-panel .board { gap: .9rem; margin-bottom: 1rem; }
+.board-panel .board { margin-bottom: 1rem; }
 .board-panel .tiles { gap: .4rem; }
 .board-panel .tile { width: 4rem; padding: .35rem 0 .3rem; }
 .board-panel .tile-symbol { font-size: 1.8rem; }

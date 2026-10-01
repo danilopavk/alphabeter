@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -243,7 +244,7 @@ func TestLandingPage(t *testing.T) {
 	}
 	for _, want := range []string{
 		"How it works", `href="/signup"`, `href="/login"`, "A, I, K, M, N, P, 0, 1 and 2",
-		`<li class="tile retired">`, tileHTML("locked", "B", ""),
+		`<li class="tile mastered">`, tileHTML("locked", "B", ""),
 	} {
 		if !strings.Contains(res.body, want) {
 			t.Errorf("landing page lacks %s", want)
@@ -476,12 +477,14 @@ func TestPlay(t *testing.T) {
 	if symbol == nil {
 		t.Fatal("no symbol on the play page")
 	}
-	if s, ok := game.ParseSymbol(symbol[1]); !ok || !slices.Contains(game.Batches[0], s) {
-		t.Errorf("first symbol %q is not from batch 1", symbol[1])
+	if s, ok := game.ParseSymbol(symbol[1]); !ok || !slices.Contains(game.Order[:game.StartCount], s) {
+		t.Errorf("first symbol %q is not a start symbol", symbol[1])
 	}
 	for _, want := range []string{
 		`<span class="score-value">` + symbol[1] + ` score: 100</span>`,
-		`<span class="score-note">Over 130 needed for the next level</span>`,
+		`<span class="score-note">Next letter: <span class="bar"><b>average</b> 100 / 110</span> · ` +
+			`<span class="bar"><b>top</b> 100 / 120</span> · ` +
+			`<span class="bar"><b>lowest</b> 100 / 100 <span class="tick">✓</span></span></span>`,
 	} {
 		if !strings.Contains(page.body, want) {
 			t.Errorf("play page lacks %s", want)
@@ -523,6 +526,43 @@ func TestPlay(t *testing.T) {
 	}
 }
 
+// When a new letter joins, the answer's stage shows it with the joining
+// animation (which also holds the answers); the next answer's stage does not.
+func TestNewLetterJoins(t *testing.T) {
+	e := start(t)
+	b := e.browser()
+	b.signUp("parent@example.com")
+	slug := b.addKid("Mia")
+
+	answer := func(seq int) response {
+		return b.post("/kids/"+slug+"/answer", url.Values{"seq": {strconv.Itoa(seq)}, "correct": {"1"}}, "HX-Request", "true")
+	}
+	seq := 0
+	var res response
+	for ; seq < 200; seq++ {
+		if res = answer(seq); strings.Contains(res.body, "New letter") {
+			break
+		}
+		if strings.Contains(res.body, `data-joining`) {
+			t.Fatalf("answer %d holds the game without a new letter", seq+1)
+		}
+	}
+	for _, want := range []string{
+		`<main id="stage" data-joining>`,
+		`<div class="flash-message">New letter: E</div>`,
+	} {
+		if !strings.Contains(res.body, want) {
+			t.Errorf("joining answer (%d) lacks %s: %s", seq+1, want, res.body)
+		}
+	}
+	if m := symbolPattern.FindStringSubmatch(res.body); m == nil || m[1] != "E" {
+		t.Errorf("the new E is not on screen: %v", m)
+	}
+	if next := answer(seq + 1); strings.Contains(next.body, `data-joining`) {
+		t.Error("the answer after the new letter still holds the game")
+	}
+}
+
 // tileHTML is how the progress board shows one symbol.
 func tileHTML(status, symbol, score string) string {
 	html := `<li class="tile ` + status + `"><span class="tile-symbol">` + symbol + `</span>`
@@ -545,7 +585,7 @@ func TestDashboard(t *testing.T) {
 		tileHTML("learning", "A", "100"),
 		tileHTML("learning", "2", "100"),
 		tileHTML("locked", "B", ""),
-		`<span class="swatch known"></span>Over 130`,
+		`<span class="swatch known"></span>150–200`,
 	} {
 		if !strings.Contains(list.body, want) {
 			t.Errorf("kids page lacks %s", want)

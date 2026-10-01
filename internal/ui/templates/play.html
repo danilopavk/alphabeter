@@ -10,11 +10,11 @@
 {{end}}
 
 {{define "stage"}}
-<main id="stage">
+<main id="stage"{{with .Flash}}{{if .Joined}} data-joining{{end}}{{end}}>
   <div class="corner">
     <button type="button" class="score" data-board-toggle aria-controls="board">
       <span class="score-value">{{.Symbol}} score: {{.Score}}</span>
-      <span class="score-note">{{.Note}}</span>
+      <span class="score-note">{{with .Bars}}Next letter:{{range $i, $b := .}}{{if $i}} ·{{end}} <span class="bar"><b>{{.Name}}</b> {{.Now}} / {{.Need}}{{if .Reached}} <span class="tick">✓</span>{{end}}</span>{{end}}{{else}}Free play{{end}}</span>
       <span class="score-hint">Click on a score or press d to open the scorecard</span>
     </button>
     {{with .Flash}}

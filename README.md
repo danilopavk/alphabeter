@@ -5,7 +5,7 @@ parent.
 
 The app shows one big letter or digit on a white screen. The kid says what it is, and the parent
 taps **Yes** or **No**. Behind the scenes every letter keeps a score: the app shows the letters a
-kid knows least more often, and it unlocks new letters level by level as the kid learns them.
-When all four levels are done, the kid can keep playing with the whole alphabet.
+kid knows least more often, and it brings in new letters one at a time as the kid learns them,
+until all 26 letters and 10 digits are in play.
 
 One parent account can have several kids, each with their own progress.

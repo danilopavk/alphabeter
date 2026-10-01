@@ -24,13 +24,13 @@
   <p>Every letter keeps a score. The ones your kid knows least come up most often, and the ones they
     already know come up less, so each round goes where it helps.</p>
 
-  <h2>{{.Levels}} levels</h2>
-  <p>It starts with just a few: {{.FirstLevel}}. Once your kid knows them all, the next level
-    unlocks, until all 26 letters and 10 digits are in play. After the last level they can keep
-    playing with the whole alphabet.</p>
+  <h2>One new letter at a time</h2>
+  <p>It starts with just a few: {{.Start}}. As your kid gets to know them, new ones join, one at a
+    time, until all 26 letters and 10 digits are in play. Once a letter joins it stays, so the ones
+    they learned early keep coming back.</p>
 
   <h2>See their progress</h2>
-  <p>Each letter turns from red to green as your kid learns it. This is a kid halfway through level 2:</p>
+  <p>Each letter turns from red to green as your kid learns it. This is a kid with 12 of the 36 so far:</p>
   {{template "board" .Board}}
   {{template "legend" .Legend}}
 

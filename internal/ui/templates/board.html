@@ -1,14 +1,9 @@
 {{define "board"}}
 <div class="board">
-  {{range .}}
-  <div class="level{{if .Locked}} locked{{end}}">
-    <div class="level-name">Level {{.Number}}</div>
-    <ul class="tiles">
-      {{range .Tiles}}<li class="tile {{.Status}}"><span class="tile-symbol">{{.Symbol}}</span>{{with .Score}}<span class="tile-score">{{.}}</span>{{end}}</li>
-      {{end}}
-    </ul>
-  </div>
-  {{end}}
+  <ul class="tiles">
+    {{range .}}<li class="tile {{.Status}}"><span class="tile-symbol">{{.Symbol}}</span>{{with .Score}}<span class="tile-score">{{.}}</span>{{end}}</li>
+    {{end}}
+  </ul>
 </div>
 {{end}}
 

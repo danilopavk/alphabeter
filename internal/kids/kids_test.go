@@ -52,7 +52,7 @@ func TestCreateInitialisesState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if kid.Name != "Mia" || kid.State.Seq != 0 || kid.State.Batch != 1 || !kid.State.IsUnlocked(kid.State.Current) {
+	if kid.Name != "Mia" || kid.State.Seq != 0 || kid.State.InPlay != game.StartCount || !kid.State.IsInPlay(kid.State.Current) {
 		t.Errorf("created %+v", kid)
 	}
 	var size int
