@@ -14,3 +14,18 @@
     if (e.target.closest("[data-board-toggle]")) setOpen(!isOpen());
   });
 })();
+
+// A right answer's letter flies off the screen (app.css), each time at least
+// 60° away from the last one's way. Set here as the CSP allows no inline styles.
+(() => {
+  let angle = Math.random() * 360;
+
+  document.addEventListener("htmx:afterSwap", () => {
+    const fly = document.querySelector(".fly");
+    if (!fly) return;
+    angle = (angle + 60 + Math.random() * 240) % 360;
+    const rad = (angle * Math.PI) / 180;
+    fly.style.setProperty("--x", `${Math.cos(rad) * 150}vmax`);
+    fly.style.setProperty("--y", `${Math.sin(rad) * 150}vmax`);
+  });
+})();

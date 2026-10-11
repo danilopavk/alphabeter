@@ -526,6 +526,34 @@ func TestPlay(t *testing.T) {
 	}
 }
 
+// A right answer sends the answered letter flying off the screen; a wrong one
+// and a rejected double tap do not.
+func TestRightAnswerFliesAway(t *testing.T) {
+	e := start(t)
+	b := e.browser()
+	b.signUp("parent@example.com")
+	slug := b.addKid("Mia")
+
+	page := b.get("/kids/" + slug + "/play")
+	if strings.Contains(page.body, `class="fly"`) {
+		t.Error("a fresh play page has a flying letter")
+	}
+	answer := func(seq, correct string) response {
+		return b.post("/kids/"+slug+"/answer", url.Values{"seq": {seq}, "correct": {correct}}, "HX-Request", "true")
+	}
+	shown := symbolPattern.FindStringSubmatch(page.body)
+	res := answer("0", "1")
+	if want := `<div class="fly" aria-hidden="true">` + shown[1] + `</div>`; !strings.Contains(res.body, want) {
+		t.Errorf("right answer lacks %s: %s", want, res.body)
+	}
+	if res = answer("0", "1"); strings.Contains(res.body, `class="fly"`) {
+		t.Error("a rejected double tap has a flying letter")
+	}
+	if res = answer("1", "0"); strings.Contains(res.body, `class="fly"`) {
+		t.Error("a wrong answer has a flying letter")
+	}
+}
+
 // When a new letter joins, the answer's stage shows it with the joining
 // animation (which also holds the answers); the next answer's stage does not.
 func TestNewLetterJoins(t *testing.T) {

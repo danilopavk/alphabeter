@@ -27,6 +27,7 @@
     {{end}}
   </div>
   <div class="symbol" aria-live="polite">{{.Symbol}}</div>
+  {{with .Flash}}{{if .Correct}}<div class="fly" aria-hidden="true">{{.Symbol}}</div>{{end}}{{end}}
   <form class="answers" method="post" action="/kids/{{.Path}}/answer"
         hx-post="/kids/{{.Path}}/answer" hx-target="#stage" hx-swap="outerHTML"
         hx-disabled-elt="find .yes, find .no">

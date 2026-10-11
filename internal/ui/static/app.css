@@ -114,7 +114,8 @@ button:disabled { opacity: .5; cursor: default; }
 /* Play: white screen, huge black symbol, Yes/No for the parent below. */
 body.play { height: 100vh; height: 100dvh; overflow: hidden; background: #fff; }
 #stage { height: 100vh; height: 100dvh; display: grid; grid-template-rows: 1fr auto; }
-.symbol {
+.symbol, .fly {
+  grid-area: 1 / 1;
   display: grid;
   place-items: center;
   overflow: hidden;
@@ -125,6 +126,24 @@ body.play { height: 100vh; height: 100dvh; overflow: hidden; background: #fff; }
   color: #000;
   user-select: none;
   -webkit-user-select: none;
+}
+
+/* A right answer: a green copy of the letter, over the next one and the
+   buttons, flies off the screen. play.js points it a random way (--x, --y);
+   up until it does. */
+.fly {
+  --x: 0;
+  --y: -150vmax;
+  z-index: 1;
+  color: var(--yes);
+  pointer-events: none;
+  animation: fly .8s ease-in forwards;
+}
+@keyframes fly {
+  to { transform: translate(var(--x), var(--y)); visibility: hidden; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fly { display: none; }
 }
 .answers {
   display: grid;
